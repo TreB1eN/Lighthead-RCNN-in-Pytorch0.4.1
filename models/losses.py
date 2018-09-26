@@ -42,12 +42,13 @@ def OHEM_loss(roi_cls_locs,
     assert roi_loc_loss.shape == roi_cls_loss.shape
 
     n_ohem_sample = min(n_ohem_sample, n_sample)
-
-    roi_cls_loc_loss = roi_loc_loss.detach() + roi_cls_loss.detach()
+    total_roi_loc_loss = roi_loc_loss.detach()
+    total_roi_cls_loss = roi_cls_loss.detach()
+    roi_cls_loc_loss = total_roi_loc_loss + total_roi_cls_loss
     _, indices = roi_cls_loc_loss.sort(descending=True)
     indices = indices[:n_ohem_sample]
     # indices = cuda.to_gpu(indices)
     roi_loc_loss = torch.sum(roi_loc_loss[indices]) / n_ohem_sample
     roi_cls_loss = torch.sum(roi_cls_loss[indices]) / n_ohem_sample
 
-    return roi_loc_loss, roi_cls_loss
+    return roi_loc_loss, roi_cls_loss, total_roi_loc_loss.mean().item(), total_roi_cls_loss.mean().item()

@@ -17,7 +17,7 @@ class coco_dataset(Dataset):
         self.pair = namedtuple('pair', ['img', 'bboxes', 'labels', 'scale'])
         self.maps = conf.maps
         self.transform = conf.transform
-        self.min_size = conf.min_size
+        self.min_sizes = conf.min_sizes
         self.max_size = conf.max_size
 #         with open(conf.data_path/'valid_index.pkl', 'rb') as f:
 #             self.valid_ids = pickle.load(f)
@@ -63,14 +63,14 @@ class coco_dataset(Dataset):
             resize scale
         """
         W, H = img.size
-        scale = 1.
-        scale = self.min_size / min(H, W)
+        min_size = random.choice(self.min_sizes)
+        scale = min_size / min(H, W)
         if scale * max(H, W) > self.max_size:
             scale = self.max_size / max(H, W)
         img = img.resize((int(W * scale), int(H * scale)), Image.BICUBIC)
         return img, scale
 
-def prepare_img(conf, img):
+def prepare_img(conf, img, resolution = -1):
     """Preprocess an image for feature extraction.
 
     The length of the shorter edge is scaled to :obj:`conf.min_size`.
@@ -85,12 +85,12 @@ def prepare_img(conf, img):
         A preprocessed image.
         resize scale
     """
-    H, W = img.size
-    scale = 1.
-    scale = conf.min_size / min(H, W)
+    W, H = img.size
+    min_size = conf.min_sizes[resolution]
+    scale = min_size / min(H, W)
     if scale * max(H, W) > conf.max_size:
         scale = conf.max_size / max(H, W)
-    img = img.resize((int(H * scale), int(W * scale)), Image.BICUBIC)
+    img = img.resize((int(W * scale), int(H * scale)), Image.BICUBIC)
     return img, scale    
 
 def rcnn_collate_fn(batch):

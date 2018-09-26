@@ -15,15 +15,30 @@ class Config(object):
     pretrained_model_path = 'models/lighthead-rcnn-extractor-pretrained.pth'
     work_space = Path('work_space')
     log_path = work_space/'log'
-    min_size=800
-    max_size=1333
+    min_sizes = [600, 700, 800, 900, 1000]
+#     min_sizes = [1000] # delete this when finish debug
+    max_size = 1400
     class_num = 80
-    roi_size= 7
-    font_size = 12
+    roi_size = 7
+    font_size = 10
     spatial_scale = 1/16.
     with open(data_path/'coco_maps.json', 'r') as f:
         maps = json.load(f)
     correct_id_2_class = maps[2]
+    
+    use_roi_align = True
+    
+#     eva_num_during_training = 2000
+#     coco_eva_num_during_training = 2000
+    # test only
+    board_loss_interval = 100
+    eval_interval = 10
+    eval_coco_interval = 4
+    board_pred_image_interval = 5
+    save_interval = 12
+    
+    eva_num_during_training = 1000
+    coco_eva_num_during_training = 2500
     
     mean = [0.48145765, 0.45469216, 0.40384355]
     std = [1., 1., 1.]
@@ -51,5 +66,3 @@ class Config(object):
     
     loc_std_tensor = torch.tensor(loc_normalize_std, dtype=torch.float).to(device)
     loc_mean_tensor = torch.tensor(loc_normalize_mean, dtype=torch.float).to(device)
-#     def __init__(self, c = 4):
-#         self.c = 4

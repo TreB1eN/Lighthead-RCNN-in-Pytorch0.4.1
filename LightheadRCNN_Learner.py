@@ -3,6 +3,7 @@ from tqdm import tqdm
 import os
 import torch
 import numpy as np
+import torch
 from torch.nn import Module
 from models.region_proposal_network import RegionProposalNetwork
 from models.backbone import ResNet101Extractor
@@ -32,17 +33,22 @@ class LightHeadRCNN_Learner(Module):
 
         self.extractor = ResNet101Extractor(self.conf.pretrained_model_path).to(self.conf.device)
         self.rpn = RegionProposalNetwork().to(self.conf.device)
-        self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, self.conf.roi_size).to(self.conf.device)
+#         self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, self.conf.roi_size).to(self.conf.device)
+        self.loc_normalize_mean=(0., 0., 0., 0.),
+        self.loc_normalize_std=(0.1, 0.1, 0.2, 0.2)
+        self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, 
+                                                self.conf.roi_size, 
+                                                roi_align = self.conf.use_roi_align).to(self.conf.device)
         self.class_2_color = get_class_colors(self.conf)
         self.detections = namedtuple('detections', ['roi_cls_locs', 'roi_scores', 'rois'])
-        
+             
         if training:
             self.train_dataset = coco_dataset(self.conf, self.conf.train_path, self.conf.train_anno_path)
             self.train_length = len(self.train_dataset)
             self.val_dataset = coco_dataset(self.conf, self.conf.val_path, self.conf.val_anno_path)
             self.val_length = len(self.val_dataset)
             self.anchor_target_creator = AnchorTargetCreator()
-            self.proposal_target_creator = ProposalTargetCreator()
+            self.proposal_target_creator = ProposalTargetCreator(loc_normalize_mean = self.loc_normalize_mean, loc_normalize_std = self.loc_normalize_std)
             self.step = 0
             self.optimizer = SGD([
                 {'params' : get_trainables(self.extractor.parameters())},
@@ -57,14 +63,23 @@ class LightHeadRCNN_Learner(Module):
                                             ['loss_total', 
                                              'rpn_loc_loss', 
                                              'rpn_cls_loss', 
-                                             'roi_loc_loss', 
-                                             'roi_cls_loss'])
+                                             'ohem_roi_loc_loss', 
+                                             'ohem_roi_cls_loss',
+                                             'total_roi_loc_loss',
+                                             'total_roi_cls_loss'])                                      
             self.writer = SummaryWriter(self.conf.log_path)
-            self.board_loss_every = self.train_length // 100
-            self.evaluate_every = self.train_length // 10
-            self.eva_on_coco_every = self.train_length // 2
-            self.board_pred_image_every = self.train_length // 4
-#             self.save_every = self.train_length //5
+            self.board_loss_every = self.train_length // self.conf.board_loss_interval
+            self.evaluate_every = self.train_length // self.conf.eval_interval
+            self.eva_on_coco_every = self.train_length // self.conf.eval_coco_interval
+            self.board_pred_image_every = self.train_length // self.conf.board_pred_image_interval
+            self.save_every = self.train_length // self.conf.save_interval
+            # only for debugging
+#             self.board_loss_every = 5
+#             self.evaluate_every = 6
+#             self.eva_on_coco_every = 7
+#             self.board_pred_image_every = 8
+#             self.save_every = 10
+
         '''test only codes'''
         self.step = 0
         self.optimizer = SGD([
@@ -114,19 +129,25 @@ class LightHeadRCNN_Learner(Module):
             
             rpn_cls_loss = F.cross_entropy(rpn_scores[0], gt_rpn_labels, ignore_index = -1)
             
-            roi_loc_loss, roi_cls_loss = OHEM_loss(roi_cls_locs, 
-                                                   roi_scores, 
-                                                   gt_roi_locs, 
-                                                   gt_roi_labels, 
-                                                   self.conf.n_ohem_sample, 
-                                                   self.conf.roi_sigma)
+            ohem_roi_loc_loss, \
+            ohem_roi_cls_loss, \
+            total_roi_loc_loss, \
+            total_roi_cls_loss = OHEM_loss(roi_cls_locs, 
+                                           roi_scores, 
+                                           gt_roi_locs, 
+                                           gt_roi_labels, 
+                                           self.conf.n_ohem_sample, 
+                                           self.conf.roi_sigma)
             
-            loss_total = rpn_loc_loss + rpn_cls_loss + roi_loc_loss + roi_cls_loss
+            loss_total = rpn_loc_loss + rpn_cls_loss + ohem_roi_loc_loss + ohem_roi_cls_loss
+            
             return self.train_outputs(loss_total, 
                                       rpn_loc_loss.item(), 
                                       rpn_cls_loss.item(), 
-                                      roi_loc_loss.item(), 
-                                      roi_cls_loss.item())
+                                      ohem_roi_loc_loss.item(), 
+                                      ohem_roi_cls_loss.item(),
+                                      total_roi_loc_loss,
+                                      total_roi_cls_loss)
         
         else:
             roi_cls_locs, roi_scores = self.head(roi_feature, rois)
@@ -142,13 +163,14 @@ class LightHeadRCNN_Learner(Module):
         self.use_preset(preset)
         with torch.no_grad():
             orig_size = img.size
-            img, scale = prepare_img(self.conf, img)
+            img, scale = prepare_img(self.conf, img, -1)
             img = self.conf.transform(img).unsqueeze(0)
             img_size = (img.shape[2], img.shape[3])
             detections = self.forward(img, scale)
             n_sample = len(detections.roi_cls_locs)
             n_class = self.conf.class_num + 1
             roi_cls_locs = detections.roi_cls_locs.reshape((n_sample, -1, 4)).reshape([-1,4])
+            roi_cls_locs = roi_cls_locs * torch.tensor(self.loc_normalize_std, device=self.conf.device) + torch.tensor(self.loc_normalize_mean, device=self.conf.device)
             rois = torch.tensor(detections.rois.repeat(n_class,0), dtype=torch.float).to(self.conf.device)
             raw_cls_bboxes = loc2bbox(rois, roi_cls_locs)
             torch.clamp(raw_cls_bboxes[:,0::2], 0, img_size[1], out = raw_cls_bboxes[:,0::2] )
@@ -171,9 +193,7 @@ class LightHeadRCNN_Learner(Module):
         labels = labels.cpu().numpy()
         scores = scores.cpu().numpy()
         if original_size:
-            bboxes = x1y1x2y2_2_xywh(bboxes)
             bboxes = adjust_bbox(scale, bboxes, detect=True)
-            bboxes = xywh_2_x1y1x2y2(bboxes)
         if not return_img:        
             return bboxes, labels, scores
         else:
@@ -194,7 +214,6 @@ class LightHeadRCNN_Learner(Module):
                                                 scores = scores_)
             
             return predicted_img
-
     
     def _suppress(self, raw_cls_bboxes, raw_prob):
         bbox = []
@@ -205,8 +224,7 @@ class LightHeadRCNN_Learner(Module):
             prob_l = raw_prob[:, l]
             mask = prob_l > self.score_thresh
             if not mask.any():
-                print("looks like there is no prediction have a prob larger than thresh")
-                return [], [], []
+                continue
             cls_bbox_l = cls_bbox_l[mask]
             prob_l = prob_l[mask]    
             prob_l, order = torch.sort(prob_l, descending=True)
@@ -216,17 +234,30 @@ class LightHeadRCNN_Learner(Module):
             # The labels are in [0, 79].
             label.append((l - 1) * torch.ones((len(keep),), dtype = torch.long))
             prob.append(prob_l[keep])
+        if len(bbox) == 0:
+            print("looks like there is no prediction have a prob larger than thresh")
+            return [], [], []
         bbox = torch.cat(bbox)
         label = torch.cat(label)
         prob = torch.cat(prob)
         return bbox, label, prob
     
-    def board_scalars(self, key, loss_total, rpn_loc_loss, rpn_cls_loss, roi_loc_loss, roi_cls_loss):
+    def board_scalars(self, 
+                      key, 
+                      loss_total, 
+                      rpn_loc_loss, 
+                      rpn_cls_loss, 
+                      ohem_roi_loc_loss, 
+                      ohem_roi_cls_loss, 
+                      total_roi_loc_loss, 
+                      total_roi_cls_loss):
         self.writer.add_scalar('{}_loss_total'.format(key), loss_total, self.step)
         self.writer.add_scalar('{}_rpn_loc_loss'.format(key), rpn_loc_loss, self.step)
         self.writer.add_scalar('{}_rpn_cls_loss'.format(key), rpn_cls_loss, self.step)
-        self.writer.add_scalar('{}_roi_loc_loss'.format(key), roi_loc_loss, self.step)
-        self.writer.add_scalar('{}_roi_cls_loss'.format(key), roi_cls_loss, self.step)
+        self.writer.add_scalar('{}_ohem_roi_loc_loss'.format(key), ohem_roi_loc_loss, self.step)
+        self.writer.add_scalar('{}_ohem_roi_cls_loss'.format(key), ohem_roi_cls_loss, self.step)
+        self.writer.add_scalar('{}_total_roi_loc_loss'.format(key), total_roi_loc_loss, self.step)
+        self.writer.add_scalar('{}_total_roi_cls_loss'.format(key), total_roi_cls_loss, self.step)
     
     def use_preset(self, preset):
         """Use the given preset during prediction.
@@ -242,18 +273,22 @@ class LightHeadRCNN_Learner(Module):
         them by directly accessing the public attributes.
 
         Args:
-            preset ({'visualize', 'evaluate'): A string to determine the
+            preset ({'visualize', 'evaluate', 'debug'): A string to determine the
                 preset to use.
 
         """
         if preset == 'visualize':
             self.nms_thresh = 0.5
-            self.score_thresh = 0.5
-            self.max_n_predict = 100
+            self.score_thresh = 0.25
+            self.max_n_predict = 40
         elif preset == 'evaluate':
             self.nms_thresh = 0.5
             self.score_thresh = 0.0
             self.max_n_predict = 100
+        elif preset == 'debug':
+            self.nms_thresh = 0.5
+            self.score_thresh = 0.0
+            self.max_n_predict = 10
         else:
             raise ValueError('preset must be visualize or evaluate')
     
@@ -262,12 +297,19 @@ class LightHeadRCNN_Learner(Module):
         running_loss = 0.
         running_rpn_loc_loss = 0.
         running_rpn_cls_loss = 0.
-        running_roi_loc_loss = 0.
-        running_roi_cls_loss = 0.
+        running_ohem_roi_loc_loss = 0.
+        running_ohem_roi_cls_loss = 0.
+        running_total_roi_loc_loss = 0.
+        running_total_roi_cls_loss = 0.
+        map05 = None
+        val_loss = None
+        
         epoch = self.step // self.train_length
+        
         while epoch <= epochs:
-            lr_schedule(self, epoch)
-            for index in tqdm(np.random.permutation(self.train_length)):
+            self.lr_schedule(epoch)
+#             for index in tqdm(np.random.permutation(self.train_length), total = self.train_length):
+            for index in tqdm(range(self.train_length), total = self.train_length):
                 inputs = self.train_dataset[index]
                 if inputs.bboxes == []:
                     continue
@@ -276,17 +318,20 @@ class LightHeadRCNN_Learner(Module):
                                              inputs.scale,
                                              inputs.bboxes,
                                              inputs.labels)
-                train_outputs.loss.backward()
+                train_outputs.loss_total.backward()
                 if epoch == 0:
                     if self.step <= self.warm_up_duration:
                         self.lr_warmup()
                 self.optimizer.step()
+                torch.cuda.empty_cache()
                 
                 running_loss += train_outputs.loss_total.item()
                 running_rpn_loc_loss += train_outputs.rpn_loc_loss
                 running_rpn_cls_loss += train_outputs.rpn_cls_loss
-                running_roi_loc_loss += train_outputs.roi_loc_loss
-                running_roi_cls_loss += train_outputs.roi_cls_loss
+                running_ohem_roi_loc_loss += train_outputs.ohem_roi_loc_loss
+                running_ohem_roi_cls_loss += train_outputs.ohem_roi_cls_loss
+                running_total_roi_loc_loss += train_outputs.total_roi_loc_loss
+                running_total_roi_cls_loss += train_outputs.total_roi_cls_loss
                 
                 if self.step != 0:
                     if self.step % self.board_loss_every == 0:
@@ -294,51 +339,70 @@ class LightHeadRCNN_Learner(Module):
                                            running_loss / self.board_loss_every, 
                                            running_rpn_loc_loss / self.board_loss_every, 
                                            running_rpn_cls_loss / self.board_loss_every,
-                                           running_roi_loc_loss / self.board_loss_every, 
-                                           running_roi_cls_loss / self.board_loss_every)
+                                           running_ohem_roi_loc_loss / self.board_loss_every, 
+                                           running_ohem_roi_cls_loss / self.board_loss_every,
+                                           running_total_roi_loc_loss / self.board_loss_every, 
+                                           running_total_roi_cls_loss / self.board_loss_every)
                         running_loss = 0.
                         running_rpn_loc_loss = 0.
                         running_rpn_cls_loss = 0.
-                        running_roi_loc_loss = 0.
-                        running_roi_cls_loss = 0.
-                    
+                        running_ohem_roi_loc_loss = 0.
+                        running_ohem_roi_cls_loss = 0.
+                        running_total_roi_loc_loss = 0.
+                        running_total_roi_cls_loss = 0.
+
                     if self.step % self.evaluate_every == 0:
-                        val_loss, 
-                        val_rpn_loc_loss, 
-                        val_rpn_cls_loss, 
-                        val_roi_loc_loss, 
-                        val_roi_cls_loss = self.evaluate(num=1000)
+                        val_loss, val_rpn_loc_loss, \
+                        val_rpn_cls_loss, \
+                        ohem_val_roi_loc_loss, \
+                        ohem_val_roi_cls_loss, \
+                        total_val_roi_loc_loss, \
+                        total_val_roi_cls_loss = self.evaluate(num = self.conf.eva_num_during_training)
+                        self.set_training() 
                         self.board_scalars('val', 
                                            val_loss, 
                                            val_rpn_loc_loss, 
                                            val_rpn_cls_loss, 
-                                           val_roi_loc_loss,
-                                           val_roi_cls_loss)
+                                           ohem_val_roi_loc_loss,
+                                           ohem_val_roi_cls_loss,
+                                           total_val_roi_loc_loss,
+                                           total_val_roi_cls_loss)
                     
                     if self.step % self.eva_on_coco_every == 0:
                         try:
-                            cocoEval = self.eva_coco(conf, limit=0)
+                            cocoEval = self.eva_coco(conf, limit = self.conf.coco_eva_num_during_training)
+                            self.set_training() 
                             map05 = cocoEval.stats[1]
                         except:
                             map05 = 0
-                        self.writers[self.res_idx].add_scalar('0.5IoU MAP', map05, self.steps[self.res_idx])
-                        try:
-                            self.save_state(val_loss, map05, epoch=epoch)
-                        except:
-                            continue
+                        self.writer.add_scalar('0.5IoU MAP', map05, self.step)
                     
                     if self.step % self.board_pred_image_every == 0:
                         for i in range(20):
                             img, _ = self.val_dataset.orig_dataset[i] 
-                            img = self.predict_on_img(img, preset='visualize', return_img=True, with_scores=True, original_size=True) 
-                            self.writers[self.res_idx].add_image('pred_image_{}'.format(i), trans.ToTensor()(img), global_step=self.step)
+                            predicted_img = self.predict_on_img(img, preset='visualize', return_img=True, with_scores=True, original_size=True) 
+                            if type(predicted_img) == tuple:
+                                self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(img), global_step=self.step)
+                            else:
+                                self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(predicted_img), global_step=self.step)
+                            self.set_training()
+                    
+                    if self.step % self.save_every == 0:
+                        try:
+                            self.save_state(val_loss, map05)
+                        except:
+                            print('save state failed')
+                            self.step += 1
+                            continue
+                    
                 self.step += 1
-                epoch = self.step // self.train_length
+            epoch = self.step // self.train_length
     
     def eva_on_coco(self, limit = 0):
         total = limit if limit else len(self.val_loader.dataset)
         image_ids = []
         results = []
+        self.eval()
         for i in tqdm(np.random.choice(np.random.permutation(len(self.val_dataset)), total, replace=False)):
             img, target = self.val_dataset.orig_dataset[i]
             if target == []:
@@ -378,8 +442,10 @@ class LightHeadRCNN_Learner(Module):
         running_loss = 0.
         running_rpn_loc_loss = 0.
         running_rpn_cls_loss = 0.
-        running_roi_loc_loss = 0.
-        running_roi_cls_loss = 0.
+        running_ohem_roi_loc_loss = 0.
+        running_ohem_roi_cls_loss = 0.
+        running_total_roi_loc_loss = 0.
+        running_total_roi_cls_loss = 0.
         if num == None:
             total_num = self.val_length
         else:
@@ -397,13 +463,17 @@ class LightHeadRCNN_Learner(Module):
                 running_loss += val_outputs.loss_total.item()
                 running_rpn_loc_loss += val_outputs.rpn_loc_loss
                 running_rpn_cls_loss += val_outputs.rpn_cls_loss
-                running_roi_loc_loss += val_outputs.roi_loc_loss
-                running_roi_cls_loss += val_outputs.roi_cls_loss
+                running_ohem_roi_loc_loss += val_outputs.ohem_roi_loc_loss
+                running_ohem_roi_cls_loss += val_outputs.ohem_roi_cls_loss
+                running_total_roi_loc_loss += val_outputs.total_roi_loc_loss
+                running_total_roi_cls_loss += val_outputs.total_roi_cls_loss
         return running_loss / total_num, \
                 running_rpn_loc_loss / total_num, \
                 running_rpn_cls_loss / total_num, \
-                running_roi_loc_loss / total_num, \
-                running_roi_cls_loss / total_num
+                running_ohem_roi_loc_loss / total_num, \
+                running_ohem_roi_cls_loss / total_num,\
+                running_total_roi_loc_loss / total_num, \
+                running_total_roi_cls_loss / total_num
     
     def save_state(self, val_loss, map05, to_save_folder=False, model_only=False):
         if to_save_folder:

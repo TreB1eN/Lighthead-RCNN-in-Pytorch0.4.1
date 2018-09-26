@@ -49,7 +49,7 @@ def draw_bbox_class(conf, img, labels, bboxes, id_2_class, class_2_color, scores
             text = id_2_class[str(labels[i].item())]
             
         else: 
-            text = '{}_{:.20%}'.format(id_2_class[str(labels[i].item())], scores[i])
+            text = '{}_{:.2%}'.format(id_2_class[str(labels[i].item())], scores[i])
         
         text_w, text_h = draw.textsize(text,font=truefont)
         

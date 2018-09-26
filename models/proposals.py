@@ -35,16 +35,18 @@ class ProposalTargetCreator(object):
                  pos_ratio = 0.25,
                  pos_iou_thresh = 0.5,
                  neg_iou_thresh_hi = 0.5,
-                 neg_iou_thresh_lo = 0.0):
+                 neg_iou_thresh_lo = 0.0,
+                 loc_normalize_mean=(0., 0., 0., 0.),
+                 loc_normalize_std=(0.1, 0.1, 0.2, 0.2)):
         self.n_sample = n_sample
         self.pos_ratio = pos_ratio
         self.pos_iou_thresh = pos_iou_thresh
         self.neg_iou_thresh_hi = neg_iou_thresh_hi
         self.neg_iou_thresh_lo = neg_iou_thresh_lo  # NOTE: py-faster-rcnn默认的值是0.1
+        self.loc_normalize_mean = loc_normalize_mean
+        self.loc_normalize_std = loc_normalize_std
 
-    def __call__(self, roi, bbox, label,
-                 loc_normalize_mean=(0., 0., 0., 0.),
-                 loc_normalize_std=(0.1, 0.1, 0.2, 0.2)):
+    def __call__(self, roi, bbox, label):
         """Assigns ground truth to sampled proposals.
 
         This function samples total of :obj:`self.n_sample` RoIs
@@ -143,7 +145,7 @@ class ProposalTargetCreator(object):
         
         # Compute offsets and scales to match sampled RoIs to the GTs.
         gt_roi_loc = bbox2loc(sample_roi, bbox[gt_assignment[keep_index]])
-        gt_roi_loc = ((gt_roi_loc - np.array(loc_normalize_mean, np.float32)) / np.array(loc_normalize_std, np.float32))
+        gt_roi_loc = (gt_roi_loc - np.array(self.loc_normalize_mean, np.float32)) / np.array(self.loc_normalize_std, np.float32)
         # 通过bbox2loc算出来正确的偏移量，还要做一下归一化
         # 这个均值和方差是哪来的 ？
         """
