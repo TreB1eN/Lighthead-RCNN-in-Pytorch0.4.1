@@ -10,9 +10,20 @@ def adjust_bbox(scale, bboxes, detect=False):
         bboxes = bboxes / scale
     return bboxes
 
-def horizontal_flip_boxes(bboxes,size):
-    bboxes[:,0] = size - bboxes[:,0] - bboxes[:,2]
+def horizontal_flip_boxes(bboxes, size):
+    temp = (size - bboxes[:,0]).copy()
+    bboxes[:,0] = size - bboxes[:,2]
+    bboxes[:,2] = temp
     return bboxes
+
+def y1x1y2x2_2_x1y1x2y2(bbox):
+    if type(bbox) == np.ndarray:
+        new_bbox = bbox.copy()
+    if type(bbox) == torch.Tensor: 
+        new_bbox = bbox.clone()
+    new_bbox[:,0::2] = bbox[:,1::2]
+    new_bbox[:,1::2] = bbox[:,0::2]
+    return new_bbox
 
 def x1y1x2y2_2_xcycwh(bbox):
     if type(bbox) == np.ndarray:

@@ -13,17 +13,20 @@ from models.losses import OHEM_loss, fast_rcnn_loc_loss
 from tensorboardX import SummaryWriter
 from utils.config import Config
 from torchvision import transforms as trans
-from utils.dataset import coco_dataset, de_preprocess, prepare_img
-from utils.vis_tools import draw_bbox_class, get_class_colors, to_img
-from utils.bbox_tools import loc2bbox, x1y1x2y2_2_xywh, xywh_2_x1y1x2y2, adjust_bbox
-from utils.utils import get_time
+from utils.dataset import coco_dataset, prepare_img
+from utils.vis_tools import draw_bbox_class, get_class_colors, to_img, de_preprocess
+from utils.bbox_tools import loc2bbox, x1y1x2y2_2_xywh, xywh_2_x1y1x2y2, adjust_bbox, y1x1y2x2_2_x1y1x2y2
+from utils.utils import get_time, eva_coco
 from functions.nms.nms_wrapper import nms
+from functions.nms.softnms import cpu_soft_nms_idx, softnms_cpu_ori
 from torch.optim import SGD
 from models.model_utils import get_trainables
 from torch.nn import functional as F
 from collections import namedtuple
 import json
-from pycocotools.cocoeval import COCOeval
+import pycocotools.coco
+import pycocotools.cocoeval
+from PIL import Image
 
 class LightHeadRCNN_Learner(Module):
     def __init__(self, training=True):
@@ -43,12 +46,13 @@ class LightHeadRCNN_Learner(Module):
         self.detections = namedtuple('detections', ['roi_cls_locs', 'roi_scores', 'rois'])
              
         if training:
-            self.train_dataset = coco_dataset(self.conf, self.conf.train_path, self.conf.train_anno_path)
+            self.train_dataset = coco_dataset(self.conf, mode = 'train')
             self.train_length = len(self.train_dataset)
-            self.val_dataset = coco_dataset(self.conf, self.conf.val_path, self.conf.val_anno_path)
+            self.val_dataset =  coco_dataset(self.conf, mode = 'val')
             self.val_length = len(self.val_dataset)
             self.anchor_target_creator = AnchorTargetCreator()
-            self.proposal_target_creator = ProposalTargetCreator(loc_normalize_mean = self.loc_normalize_mean, loc_normalize_std = self.loc_normalize_std)
+            self.proposal_target_creator = ProposalTargetCreator(loc_normalize_mean = self.loc_normalize_mean, 
+                                                                 loc_normalize_std = self.loc_normalize_std)
             self.step = 0
             self.optimizer = SGD([
                 {'params' : get_trainables(self.extractor.parameters())},
@@ -79,16 +83,6 @@ class LightHeadRCNN_Learner(Module):
 #             self.eva_on_coco_every = 7
 #             self.board_pred_image_every = 8
 #             self.save_every = 10
-
-        '''test only codes'''
-        self.step = 0
-        self.optimizer = SGD([
-            {'params' : get_trainables(self.extractor.parameters())},
-            {'params' : self.rpn.parameters()},
-            {'params' : [*self.head.parameters()][:8], 'lr' : self.conf.lr*3},
-            {'params' : [*self.head.parameters()][8:]},
-        ], lr = self.conf.lr, momentum=self.conf.momentum, weight_decay=self.conf.weight_decay)
-        '''test only codes'''
         
     def set_training(self):
         self.train()
@@ -101,27 +95,31 @@ class LightHeadRCNN_Learner(Module):
             params['lr'] = self.base_lrs[i] * rate
            
     def lr_schedule(self, epoch):
-        if epoch < 20:
+        if epoch < 13:
             return
-        elif epoch < 26:
+        elif epoch < 16:
             rate = 0.1
         else:
             rate = 0.01
         for i, params in enumerate(self.optimizer.param_groups):
             params['lr'] = self.base_lrs[i] * rate
+        print(self.optimizer)
     
     def forward(self, img_tensor, scale, bboxes=None, labels=None, force_eval=False):
         img_tensor = img_tensor.to(self.conf.device)
-        img_size = (img_tensor.shape[2], img_tensor.shape[3])
+        img_size = (img_tensor.shape[2], img_tensor.shape[3]) # W,H
         rpn_feature, roi_feature = self.extractor(img_tensor)
         rpn_locs, rpn_scores, rois, roi_indices, anchor = self.rpn(rpn_feature, img_size, scale)
         if self.training or force_eval:
             gt_rpn_loc, gt_rpn_labels = self.anchor_target_creator(bboxes, anchor, img_size)
+            gt_rpn_labels = torch.tensor(gt_rpn_labels, dtype=torch.long).to(self.conf.device)
+            if len(bboxes) == 0:                
+                rpn_cls_loss = F.cross_entropy(rpn_scores[0], gt_rpn_labels, ignore_index = -1)
+                return self.train_outputs(rpn_cls_loss, 0, 0, 0, 0, 0, 0)
             sample_roi, gt_roi_locs, gt_roi_labels = self.proposal_target_creator(rois, bboxes, labels)
             roi_cls_locs, roi_scores = self.head(roi_feature, sample_roi)
             
             gt_rpn_loc = torch.tensor(gt_rpn_loc, dtype=torch.float).to(self.conf.device)
-            gt_rpn_labels = torch.tensor(gt_rpn_labels, dtype=torch.long).to(self.conf.device)
             gt_roi_locs = torch.tensor(gt_roi_locs, dtype=torch.float).to(self.conf.device)
             gt_roi_labels = torch.tensor(gt_roi_labels, dtype=torch.long).to(self.conf.device)
             
@@ -151,21 +149,30 @@ class LightHeadRCNN_Learner(Module):
         
         else:
             roi_cls_locs, roi_scores = self.head(roi_feature, rois)
-            return self.detections(roi_cls_locs, roi_scores, rois) 
+            return self.detections(roi_cls_locs, roi_scores, rois)
         
-    def predict_on_img(self, img, preset = 'evaluate', return_img = False, with_scores = False, original_size = False):
+    def eval_predict(self, img, preset = 'evaluate', use_softnms = False):
+        if type(img) == list:
+            img = img[0]
+        img = Image.fromarray(img.transpose(1,2,0).astype('uint8'))
+        bboxes, labels, scores = self.predict_on_img(img, preset, use_softnms, original_size = True)
+        bboxes = y1x1y2x2_2_x1y1x2y2(bboxes)
+        return [bboxes], [labels], [scores]
+        
+    def predict_on_img(self, img, preset = 'evaluate', use_softnms=False, return_img = False, with_scores = False, original_size = False):
         '''
         inputs :
-        imgs : input tensor : shape [nB,3,input_size,input_size]
+        imgs : PIL Image
         return : PIL Image (if return_img) or bboxes_group and labels_group
         '''
         self.eval()
         self.use_preset(preset)
         with torch.no_grad():
-            orig_size = img.size
+            orig_size = img.size # W,H
+            img = np.asarray(img).transpose(2,0,1)
             img, scale = prepare_img(self.conf, img, -1)
-            img = self.conf.transform(img).unsqueeze(0)
-            img_size = (img.shape[2], img.shape[3])
+            img = torch.tensor(img).unsqueeze(0)
+            img_size = (img.shape[2], img.shape[3]) # H,W
             detections = self.forward(img, scale)
             n_sample = len(detections.roi_cls_locs)
             n_class = self.conf.class_num + 1
@@ -177,9 +184,12 @@ class LightHeadRCNN_Learner(Module):
             torch.clamp(raw_cls_bboxes[:,1::2], 0, img_size[0], out = raw_cls_bboxes[:,1::2] )
             raw_cls_bboxes = raw_cls_bboxes.reshape([n_sample, n_class, 4])
             raw_prob = F.softmax(detections.roi_scores, dim=1)
-            bboxes, labels, scores = self._suppress(raw_cls_bboxes, raw_prob)
+            bboxes, labels, scores = self._suppress(raw_cls_bboxes, raw_prob, use_softnms)
             if len(bboxes) == len(labels) == len(scores) == 0:
-                return [], [], []
+                if not return_img:  
+                    return [], [], []
+                else:
+                    return to_img(self.conf, img[0])
             _, indices = scores.sort(descending=True)
             bboxes = bboxes[indices]
             labels = labels[indices]
@@ -215,7 +225,7 @@ class LightHeadRCNN_Learner(Module):
             
             return predicted_img
     
-    def _suppress(self, raw_cls_bboxes, raw_prob):
+    def _suppress(self, raw_cls_bboxes, raw_prob, use_softnms):
         bbox = []
         label = []
         prob = []
@@ -226,12 +236,18 @@ class LightHeadRCNN_Learner(Module):
             if not mask.any():
                 continue
             cls_bbox_l = cls_bbox_l[mask]
-            prob_l = prob_l[mask]    
-            prob_l, order = torch.sort(prob_l, descending=True)
-            cls_bbox_l = cls_bbox_l[order]
-            keep = nms(torch.cat((cls_bbox_l, prob_l.unsqueeze(-1)), dim=1), self.nms_thresh).squeeze(-1).tolist()
+            prob_l = prob_l[mask]
+            if use_softnms:
+                keep = cpu_soft_nms_idx(torch.cat((cls_bbox_l, prob_l.unsqueeze(-1)), dim=1).cpu().numpy(),
+                                        Nt = self.conf.softnms_Nt,
+                                        sigma = self.conf.softnms_sigma,
+                                        threshold = self.conf.softnms_thresh)
+            else:
+                prob_l, order = torch.sort(prob_l, descending=True)
+                cls_bbox_l = cls_bbox_l[order]
+                keep = nms(torch.cat((cls_bbox_l, prob_l.unsqueeze(-1)), dim=1), self.nms_thresh).squeeze(-1).tolist()
             bbox.append(cls_bbox_l[keep])
-            # The labels are in [0, 79].
+                # The labels are in [0, 79].
             label.append((l - 1) * torch.ones((len(keep),), dtype = torch.long))
             prob.append(prob_l[keep])
         if len(bbox) == 0:
@@ -285,6 +301,11 @@ class LightHeadRCNN_Learner(Module):
             self.nms_thresh = 0.5
             self.score_thresh = 0.0
             self.max_n_predict = 100
+#         """
+#         We finally replace origi-nal 0.3 threshold with 0.5 for Non-maximum Suppression
+#         (NMS). It improves 0.6 points of mmAP by improving the
+#         recall rate especially for the crowd cases.
+#         """
         elif preset == 'debug':
             self.nms_thresh = 0.5
             self.score_thresh = 0.0
@@ -292,7 +313,9 @@ class LightHeadRCNN_Learner(Module):
         else:
             raise ValueError('preset must be visualize or evaluate')
     
-    def fit(self, epochs=30):
+    def fit(self, epochs=20, resume=False, from_save_folder=False):
+        if resume:
+            self.resume_training_load(from_save_folder)
         self.set_training()        
         running_loss = 0.
         running_rpn_loc_loss = 0.
@@ -305,16 +328,19 @@ class LightHeadRCNN_Learner(Module):
         val_loss = None
         
         epoch = self.step // self.train_length
-        
         while epoch <= epochs:
+            print('start the training of epoch : {}'.format(epoch))
             self.lr_schedule(epoch)
-#             for index in tqdm(np.random.permutation(self.train_length), total = self.train_length):
-            for index in tqdm(range(self.train_length), total = self.train_length):
-                inputs = self.train_dataset[index]
-                if inputs.bboxes == []:
+            for index in tqdm(np.random.permutation(self.train_length), total = self.train_length):
+#             for index in tqdm(range(self.train_length), total = self.train_length):
+                try:
+                    inputs = self.train_dataset[index]
+                except:
+                    print('loading index {} from train dataset failed}'.format(index))
+#                     print(self.train_dataset.orig_dataset._datasets[0].id_to_prop[self.train_dataset.orig_dataset._datasets[0].ids[index]])
                     continue
                 self.optimizer.zero_grad()
-                train_outputs = self.forward(inputs.img,
+                train_outputs = self.forward(torch.tensor(inputs.img).unsqueeze(0),
                                              inputs.scale,
                                              inputs.bboxes,
                                              inputs.labels)
@@ -370,21 +396,26 @@ class LightHeadRCNN_Learner(Module):
                     
                     if self.step % self.eva_on_coco_every == 0:
                         try:
-                            cocoEval = self.eva_coco(conf, limit = self.conf.coco_eva_num_during_training)
+                            cocoEval = self.eva_on_coco(limit = self.conf.coco_eva_num_during_training)
                             self.set_training() 
-                            map05 = cocoEval.stats[1]
+                            map05 = cocoEval[1]
+                            mmap = cocoEval[0]
                         except:
-                            map05 = 0
+                            print('eval on coco failed')
+                            map05 = -1
+                            mmap = -1
                         self.writer.add_scalar('0.5IoU MAP', map05, self.step)
+                        self.writer.add_scalar('0.5::0.9 - MMAP', mmap, self.step)
                     
                     if self.step % self.board_pred_image_every == 0:
                         for i in range(20):
-                            img, _ = self.val_dataset.orig_dataset[i] 
+                            img, _, _, _ , _= self.val_dataset.orig_dataset[i]  
+                            img = Image.fromarray(img.astype('uint8').transpose(1,2,0))
                             predicted_img = self.predict_on_img(img, preset='visualize', return_img=True, with_scores=True, original_size=True) 
-                            if type(predicted_img) == tuple:
-                                self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(img), global_step=self.step)
-                            else:
-                                self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(predicted_img), global_step=self.step)
+#                             if type(predicted_img) == tuple: 
+#                                 self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(img), global_step=self.step)
+#                             else: ## should be deleted after test
+                            self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(predicted_img), global_step=self.step)
                             self.set_training()
                     
                     if self.step % self.save_every == 0:
@@ -397,45 +428,14 @@ class LightHeadRCNN_Learner(Module):
                     
                 self.step += 1
             epoch = self.step // self.train_length
+            try:
+                self.save_state(val_loss, map05, to_save_folder=True)
+            except:
+                print('save state failed')
     
-    def eva_on_coco(self, limit = 0):
-        total = limit if limit else len(self.val_loader.dataset)
-        image_ids = []
-        results = []
-        self.eval()
-        for i in tqdm(np.random.choice(np.random.permutation(len(self.val_dataset)), total, replace=False)):
-            img, target = self.val_dataset.orig_dataset[i]
-            if target == []:
-                continue
-            with torch.no_grad():    
-                bboxes, labels, scores = self.predict_on_img(img, preset = 'evaluate', return_img = False, with_scores = False, original_size = True)
-            if len(bboxes) == 0:
-                continue
-            bboxes = x1y1x2y2_2_xywh(bboxes)
-            ids = set([item['image_id'] for item in self.val_dataset.orig_dataset[i][1]])
-    #         assert len(ids) == 1 or len(ids) == 0, 'more than 1 image_id in one coco instance'
-            if len(ids) == 0: continue
-            image_id = ids.pop()
-            image_ids.append(image_id)
-            for k in range(len(labels)):
-                result = {
-                    "image_id": image_id,
-                    "category_id": self.conf.maps[1][str(labels[k].item())],
-                    "bbox": bboxes[k].tolist(),
-                    "score": scores[k].item(),
-                }
-                results.append(result)
-
-        with open("data/results.json",'w',encoding='utf-8') as json_file:
-            json.dump(results,json_file, ensure_ascii=False)
-
-        coco_dt = self.val_dataset.orig_dataset.coco.loadRes("data/results.json")
-        cocoEval = COCOeval(self.val_dataset.orig_dataset.coco, coco_dt, "bbox")
-        cocoEval.params.imgIds = image_ids
-        cocoEval.evaluate()
-        cocoEval.accumulate()
-        cocoEval.summarize()
-        return cocoEval
+    def eva_on_coco(self, limit = 1000, preset = 'evaluate', use_softnms = False):
+        self.eval() 
+        return eva_coco(self.val_dataset.orig_dataset, lambda x : self.eval_predict(x, preset, use_softnms), limit, preset)
     
     def evaluate(self, num=None):
         self.eval()        
@@ -451,11 +451,11 @@ class LightHeadRCNN_Learner(Module):
         else:
             total_num = num
         with torch.no_grad():
-            for index in range(total_num):
+            for index in tqdm(range(total_num)):
                 inputs = self.val_dataset[index]
                 if inputs.bboxes == []:
                     continue
-                val_outputs = self.forward(inputs.img.to(self.conf.device),
+                val_outputs = self.forward(torch.tensor(inputs.img).unsqueeze(0),
                                            inputs.scale,
                                            inputs.bboxes,
                                            inputs.labels,
@@ -480,23 +480,24 @@ class LightHeadRCNN_Learner(Module):
             save_path = self.conf.work_space/'save'
         else:
             save_path = self.conf.work_space/'model'
+        time = get_time()
         torch.save(
             self.state_dict(), save_path /
-            ('model_{}_val_loss:{}_map05:{}_step:{}.pth'.format(get_time(),
+            ('model_{}_val_loss:{}_map05:{}_step:{}.pth'.format(time,
                                                                 val_loss, 
                                                                 map05, 
                                                                 self.step)))
         if not model_only:
             torch.save(
                 self.optimizer.state_dict(), save_path /
-                ('optimizer_{}_val_loss:{}_map05:{}_step:{}.pth'.format(get_time(),
+                ('optimizer_{}_val_loss:{}_map05:{}_step:{}.pth'.format(time,
                                                                         val_loss, 
                                                                         map05, 
                                                                         self.step)))
     
     def load_state(self, fixed_str, from_save_folder=False, model_only=False):
         if from_save_folder:
-            ave_path = self.conf.work_space/'save'
+            save_path = self.conf.work_space/'save'
         else:
             save_path = self.conf.work_space/'model'          
         self.load_state_dict(torch.load(save_path/'model_{}'.format(fixed_str)))
@@ -507,7 +508,7 @@ class LightHeadRCNN_Learner(Module):
     
     def resume_training_load(self, from_save_folder=False):
         if from_save_folder:
-            ave_path = self.conf.work_space/'save'
+            save_path = self.conf.work_space/'save'
         else:
             save_path = self.conf.work_space/'model'  
         sorted_files = sorted([*save_path.iterdir()],  key=lambda x: os.path.getmtime(x), reverse=True)
@@ -520,8 +521,8 @@ class LightHeadRCNN_Learner(Module):
             file_b = sorted_files[index + 1]
             if file_a.name.startswith('model'):
                 fix_str = file_a.name[6:]
-                if file_b.name == ''.join(['optimizer', '_', fix_str]):
-                    self.step = int(fix_str.split(':')[-1].split('.')[0])
+                self.step = int(fix_str.split(':')[-1].split('.')[0]) + 1
+                if file_b.name == ''.join(['optimizer', '_', fix_str]):                    
                     self.load_state(fix_str, from_save_folder)
                     return
                 else:
@@ -529,8 +530,8 @@ class LightHeadRCNN_Learner(Module):
                     continue
             elif file_a.name.startswith('optimizer'):
                 fix_str = file_a.name[10:]
+                self.step = int(fix_str.split(':')[-1].split('.')[0]) + 1
                 if file_b.name == ''.join(['model', '_', fix_str]):
-                    self.step = int(fix_str.split(':')[-1].split('.')[0])
                     self.load_state(fix_str, from_save_folder)
                     return
                 else:

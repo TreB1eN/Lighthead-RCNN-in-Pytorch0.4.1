@@ -235,6 +235,12 @@ class AnchorTargetCreator(object):
         n_anchor = len(anchor) # for example:16650
         inside_index = _get_inside_index(anchor, img_H, img_W)
         anchor = anchor[inside_index]
+        if len(bbox) == 0:
+            label = np.empty((len(inside_index), ), dtype=np.int32)
+            label.fill(-1)
+            label[np.random.choice(range(len(inside_index)), self.n_sample, replace=False)] = 0
+            label = _unmap(label, n_anchor, inside_index, fill=-1)
+            return [], label
         # 上面两步把一些超出图片之外的anchor过滤掉
         argmax_ious, label = self._create_label(inside_index, anchor, bbox)
         # argmax_ious每一个anchor最匹配的gt object的序号，label是根据它得出来的标记（-1,0,1）

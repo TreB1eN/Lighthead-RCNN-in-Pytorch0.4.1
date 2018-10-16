@@ -1,53 +1,67 @@
 from pycocotools.coco import COCO
-from torchvision import datasets
+from torch.utils.data import Dataset
 from collections import namedtuple
 import torch
 import numpy as np
-from torchvision.transforms.functional import hflip
 import random
 from PIL import Image
-from utils.bbox_tools import adjust_bbox, horizontal_flip_boxes, xywh_2_x1y1x2y2
-from utils.vis_tools import get_class_colors, draw_bbox_class, de_preprocess
-from torch.utils.data import Dataset
+from utils.bbox_tools import adjust_bbox, horizontal_flip_boxes, xywh_2_x1y1x2y2, y1x1y2x2_2_x1y1x2y2
+from chainercv.datasets import COCOBboxDataset
+from chainercv.chainer_experimental.datasets.sliceable import ConcatenatedDataset
+from chainercv.transforms.image.resize import resize
 import pdb
 
 class coco_dataset(Dataset):
-    def __init__(self, conf, path, anno_path):
-        self.orig_dataset = datasets.CocoDetection(path, anno_path)
+    def __init__(self, conf, mode = 'train'):
+        assert mode == 'train' or mode == 'val', 'mode shoulde be train or val'    
+        if mode == 'train':
+            self.training = True
+            self.orig_dataset = ConcatenatedDataset(COCOBboxDataset(data_dir=conf.coco_path, split='train'),
+                                                    COCOBboxDataset(data_dir=conf.coco_path, split='valminusminival'))
+            print('train dataset imported')
+        else:
+            self.training = False
+            self.orig_dataset = COCOBboxDataset(data_dir=conf.coco_path, 
+                                                split='minival', 
+                                                use_crowded=True, 
+                                                return_crowded=True, 
+                                                return_area=True)
+            print('minival dataset imported')
         self.pair = namedtuple('pair', ['img', 'bboxes', 'labels', 'scale'])
         self.maps = conf.maps
-        self.transform = conf.transform
         self.min_sizes = conf.min_sizes
         self.max_size = conf.max_size
-#         with open(conf.data_path/'valid_index.pkl', 'rb') as f:
-#             self.valid_ids = pickle.load(f)
+        self.mean = conf.mean
+#         self.std = conf.std
     
     def __len__(self):
         return len(self.orig_dataset)
     
     def __getitem__(self, index):
-        img, targets = self.orig_dataset[index]
-        img, scale = self.prepare_img(img)
-        if targets == []:
-            img = (self.transform(img) * 255).unsqueeze(0) 
+        if self.training:
+            img, bboxes, labels = self.orig_dataset[index]
+        else:
+            img, bboxes, labels, _, _ = self.orig_dataset[index]
+        img, scale = self.prepare_img(img, not self.training)
+        if len(bboxes) == 0:
+#             print('index {} dosent have objects'.format(index))
             return self.pair(img, [], [], scale)
-        labels,bboxes = synthesize_bbox_id(targets, self.maps[0])
+        bboxes = y1x1y2x2_2_x1y1x2y2(bboxes)
         bboxes = adjust_bbox(scale, bboxes)
-        if random.random() > 0.5:
-            img = hflip(img)
-            bboxes = horizontal_flip_boxes(bboxes, img.size[0])
-
-        img = self.transform(img).unsqueeze(0) 
-        bboxes = xywh_2_x1y1x2y2(bboxes.numpy())
-        img_size = [img.shape[2], img.shape[3]]
+        if self.training:
+            if random.random() > 0.5:
+                img[:] = img[:, :, ::-1]
+                bboxes = horizontal_flip_boxes(bboxes, img.shape[-1])
+#         img = torch.tensor(img).unsqueeze(0)
+        img_size = [img.shape[1], img.shape[2]] # H,W
         bboxes[:, slice(0, 4, 2)] = np.clip(bboxes[:, slice(0, 4, 2)], 0, img_size[1])
         # roi[:, [0,2]] 跟 roi[:, slice(0, 4, 2)] 不是一样嘛
         # 求出[y1,y2]之后用np.clip去掉bboxes伸出到图像尺寸之外的部分
         # 注意这里的img_size是原始图像经过放缩之后，输入到神经网络的size
         bboxes[:, slice(1, 4, 2)] = np.clip(bboxes[:, slice(1, 4, 2)], 0, img_size[0])
-        return self.pair(img, bboxes, labels.numpy(), scale)  
+        return self.pair(img, bboxes, labels, scale)
     
-    def prepare_img(self, img):
+    def prepare_img(self, img, infer = False):
         """Preprocess an image for feature extraction.
 
         The length of the shorter edge is scaled to :obj:`conf.min_size`.
@@ -56,18 +70,22 @@ class coco_dataset(Dataset):
         to :obj:`conf.max_size`.
 
         Args:
-            img (~PIL.Image): An PIL image. 
+            img (np.array): RGB img [3,H,W] 
 
         Returns:
             A preprocessed image.
             resize scale
         """
-        W, H = img.size
-        min_size = random.choice(self.min_sizes)
+        W, H = img.shape[2], img.shape[1]
+        if infer:
+            min_size = self.min_sizes[-1]
+        else:
+            min_size = random.choice(self.min_sizes)
         scale = min_size / min(H, W)
         if scale * max(H, W) > self.max_size:
             scale = self.max_size / max(H, W)
-        img = img.resize((int(W * scale), int(H * scale)), Image.BICUBIC)
+        img = resize(img, (int(H * scale), int(W * scale)))
+        img = (img - self.mean).astype(np.float32, copy=False)
         return img, scale
 
 def prepare_img(conf, img, resolution = -1):
@@ -79,18 +97,19 @@ def prepare_img(conf, img, resolution = -1):
     to :obj:`conf.max_size`.
 
     Args:
-        img (~PIL.Image): An PIL image. 
+        img (np.array): RGB img [3,H,W] 
 
     Returns:
         A preprocessed image.
         resize scale
     """
-    W, H = img.size
+    W, H = img.shape[2], img.shape[1]
     min_size = conf.min_sizes[resolution]
     scale = min_size / min(H, W)
     if scale * max(H, W) > conf.max_size:
         scale = conf.max_size / max(H, W)
-    img = img.resize((int(W * scale), int(H * scale)), Image.BICUBIC)
+    img = resize(img, (int(H * scale), int(W * scale)))
+    img = (img - conf.mean).astype(np.float32, copy=False)
     return img, scale    
 
 def rcnn_collate_fn(batch):

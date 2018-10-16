@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from functions.psroi_pooling.modules.psroi_pool import PSRoIPool
 from functions.roi_align.modules.roi_align import RoIAlignMax
 from utils.utils import normal_init
-from functions.RoIAlign_pytorch.roi_align.roi_align import RoIAlign
+from psroi_align import PSRoIAlignFunction
 
 class GlobalContextModule(Module):
     def __init__(self, in_channels, mid_channels, out_channels, ksize):
@@ -28,40 +28,43 @@ class LightHeadRCNNResNet101_Head(Module):
     def __init__(self,
                  n_class = 81,
                  roi_size = 7,
+                 out_channels = 10,
                  spatial_scale = 1/16.,
+                 sampling_ratio = 2,
                  roi_align = False):
         super(LightHeadRCNNResNet101_Head, self).__init__()
         self.n_class = n_class
         self.spatial_scale = spatial_scale
         self.roi_size = roi_size
-        self.global_context_module = GlobalContextModule(2048,256,490,15)
+        self.out_channels = out_channels
+        self.sampling_ratio = sampling_ratio
+        self.c_out = self.roi_size * self.roi_size * self.out_channels 
+        self.global_context_module = GlobalContextModule(2048, 256, self.c_out, 15)
         self.roi_align = roi_align
         self.flatten = Flatten()
-        self.fc1 = Linear(self.roi_size * self.roi_size * 10, 2048)
+        self.fc1 = Linear(self.c_out, 2048)
         self.score = Linear(2048, n_class)
         self.cls_loc = Linear(2048, 4 * n_class)
         self.apply(lambda x : normal_init(x, 0, 0.01))
+        self.cls_loc.apply(lambda x : normal_init(x, 0, 0.001))
         if self.roi_align:
-            self.pooling = RoIAlignMax(self.roi_size, self.roi_size, self.spatial_scale, 2)
-            self.conv1x1 = Conv2d(self.roi_size * self.roi_size * 10, 10, 1, bias = False)
+            self.pooling = RoIAlignMax(self.roi_size, self.roi_size, self.spatial_scale, self.sampling_ratio)
+            self.conv_pool = Conv2d(self.c_out, self.out_channels , 1, bias=False)
+        else:
+            self.pooling = PSRoIAlignFunction(self.spatial_scale, self.roi_size, self.sampling_ratio, self.out_channels)
 
     def __call__(self, x, rois):
         # global context module
         device = x.device
         h = self.global_context_module(x)
         if self.roi_align:
-            func_roi = torch.cat((torch.zeros([rois.shape[0],1], device=device),torch.tensor(rois).to(device)), dim=1) 
+            func_roi = torch.cat((torch.zeros([rois.shape[0],1], device=device), torch.tensor(rois).to(device)), dim=1) 
             pool = self.pooling(h, func_roi)
-            pool = self.conv1x1(pool)
+            pool = self.conv_pool(pool)
         else:
             # psroi max align
-            pool = position_sensitive_roi_align_pooling(h, 
-                                                 torch.tensor(rois).to(device), 
-                                                 torch.zeros([rois.shape[0]], device=device),
-                                                 crop_size=(roi_size*2, roi_size*2), 
-                                                 num_spatial_bins=(roi_size, roi_size),
-                                                 scale = self.spatial_scale,
-                                                 out_dim = 10)                                                 
+            pool = self.pooling(h, torch.tensor(rois).to(device))
+        
         pool = self.flatten(pool)
         # fc
         fc1 = F.relu(self.fc1(pool))
@@ -69,6 +72,9 @@ class LightHeadRCNNResNet101_Head(Module):
         roi_scores = self.score(fc1)
         return roi_cls_locs, roi_scores
 
+
+'''
+from functions.RoIAlign_pytorch.roi_align.crop_and_resize import CropAndResizeFunction
 def position_sensitive_roi_align_pooling(features, 
                                          boxes,
                                          box_image_indices, 
@@ -97,12 +103,12 @@ def position_sensitive_roi_align_pooling(features,
     """
     total_bins = 1
     bin_crop_size = []
-
+    
     size = [features.shape[3], features.shape[2]]
-    size_tensor = torch.tensor(size + size, dtype=torch.float)
+    size_tensor = torch.tensor(size + size, dtype=torch.float).to(features.device)
     boxes *= scale
     boxes /= size_tensor
-    # box都归一化到【0,1】
+    # box都归一化到[0,1]
 
     for num_bins, crop_dim in zip(num_spatial_bins, crop_size):
         assert num_bins >= 1
@@ -150,3 +156,4 @@ def position_sensitive_roi_align_pooling(features,
         # shape [num_boxes, 1, depth/total_bins]
         feature_crops.append(crop.unsqueeze(1))
     return torch.cat(feature_crops, dim=1)
+    '''

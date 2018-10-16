@@ -38,6 +38,12 @@ def OHEM_loss(roi_cls_locs,
     roi_cls_locs = roi_cls_locs.reshape((n_sample, -1, 4))
     roi_locs = roi_cls_locs[torch.arange(n_sample, dtype=torch.long), gt_roi_labels]
     roi_loc_loss = fast_rcnn_loc_loss(roi_locs, gt_roi_locs, gt_roi_labels, roi_sigma, reduce='no')
+    roi_loc_loss = 2 * roi_loc_loss
+    '''
+    We find that regression loss is definitely
+    smaller that classification loss in R-CNN. Thus we double
+    the R-CNN regression loss to balance multi-task training.
+    '''
     roi_cls_loss = F.cross_entropy(roi_scores, gt_roi_labels, reduce=False)
     assert roi_loc_loss.shape == roi_cls_loss.shape
 

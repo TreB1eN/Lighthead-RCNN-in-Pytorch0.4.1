@@ -79,11 +79,11 @@ def show_util(conf,idx,imgs, labels_group, bboxes_group, correct_id_2_class, cla
         trans.ToPILImage()(de_preprocess(conf, imgs[idx].cpu())),\
         labels_group[idx].cpu(), bboxes_group[idx].cpu(), correct_id_2_class, class_2_color)
 
-def de_preprocess(conf,tensor,cuda=False):
+def de_preprocess(conf, tensor, cuda=False):
     if cuda:
-        return (tensor/255 * conf.std_tensor.cuda() + conf.mean_tensor.cuda())
+        return (tensor + conf.mean_tensor.cuda())/255
     else:
-        return (tensor/255 * conf.std_tensor + conf.mean_tensor) 
+        return (tensor + conf.mean_tensor)/255
 
 def to_img(conf, tensor):
     return trans.ToPILImage()(de_preprocess(conf, tensor))
