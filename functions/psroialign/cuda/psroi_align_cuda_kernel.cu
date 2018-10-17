@@ -272,7 +272,7 @@ int my_cuda_forward(
 
     const auto total_size = batch_size * pooled_dim * pooled_height * pooled_width;
 
-    const int threads = 1024;
+    const int threads = 16;
     const int blocks = (total_size + threads - 1) / threads;
 
     my_cuda_forward_kernel<<<blocks, threads>>>(
@@ -290,6 +290,12 @@ int my_cuda_forward(
       sampling_ratio,
       top_data.data<float>(),
       argmax_data.data<int>());
+    
+    cudaError_t err = cudaGetLastError();
+    if (cudaSuccess != err) {
+        fprintf(stderr, "cudaCheckError() failed : %s\n", cudaGetErrorString(err));
+        exit(-1);
+    }
 
     return 1;
 }
@@ -312,7 +318,7 @@ int my_cuda_backward(
     const auto pooled_width = top_diff.size(3);
     const auto total_size = batch_size * pooled_dim * pooled_height * pooled_width;
   
-    const int threads = 1024;
+    const int threads = 16;
     const int blocks = (total_size + threads - 1) / threads;
 
     my_cuda_backward_kernel<<<blocks, threads>>>(
@@ -330,6 +336,11 @@ int my_cuda_backward(
       group_size,
       sampling_ratio,
       bottom_diff.data<float>());
-
+      
+    cudaError_t err = cudaGetLastError();
+    if (cudaSuccess != err) {
+        fprintf(stderr, "cudaCheckError() failed : %s\n", cudaGetErrorString(err));
+        exit(-1);
+    }
   return 1;
 }

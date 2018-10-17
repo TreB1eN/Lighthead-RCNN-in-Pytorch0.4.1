@@ -5,51 +5,52 @@ import torch
 
 import psroi_align_cuda
 
-class PS_roi_align(nn.Module):
+class PSRoIAlign(nn.Module):
     def __init__(self, spatial_scale, roi_size, sampling_ratio, pooled_dim):
-        super(PS_roi_align, self).__init__()
+        super(PSRoIAlign, self).__init__()
         self.spatial_scale = spatial_scale
         self.roi_size = roi_size
         self.sampling_ratio = sampling_ratio
         self.pooled_dim = pooled_dim
 
     def forward(self, bottom_data, bottom_rois):
-        return PSRoIAlignFunction(self.spatial_scale, self.roi_size, self.sampling_ratio, self.pooled_dim)(bottom_data, bottom_rois)
+        return PSRoIAlignFunction.apply(bottom_data, 
+                                        bottom_rois, 
+                                        self.spatial_scale, 
+                                        self.roi_size, 
+                                        self.sampling_ratio, 
+                                        self.pooled_dim)
 
 class PSRoIAlignFunction(Function):
-    def __init__(self, spatial_scale, roi_size, sampling_ratio, pooled_dim):
-        self.roi_size = int(roi_size)
-        self.pooled_dim = int(pooled_dim)
-        self.spatial_scale = float(spatial_scale)
-        self.sampling_ratio = int(sampling_ratio)
-        self.bottom_rois = None
-        self.feature_size = None
-        self.argmax_data = None
-
-    def forward(self, bottom_data, bottom_rois):
-        self.bottom_rois = bottom_rois
-        self.feature_size = bottom_data.size()
-
+    @staticmethod
+    def forward(ctx, bottom_data, bottom_rois, spatial_scale, roi_size, sampling_ratio, pooled_dim):
+        ctx.spatial_scale = spatial_scale
+        ctx.roi_size = roi_size
+        ctx.sampling_ratio = sampling_ratio
+        ctx.pooled_dim = pooled_dim
+        ctx.feature_size = bottom_data.size()
         num_rois = bottom_rois.size(0)
-
-        top_data = torch.zeros([num_rois, self.pooled_dim, self.roi_size, self.roi_size], dtype=torch.float).to(bottom_data.device)
-        argmax_data = torch.zeros([num_rois, self.pooled_dim, self.roi_size, self.roi_size], dtype=torch.int32).to(bottom_data.device)
-
+        top_data = torch.zeros([num_rois, pooled_dim, roi_size, roi_size], dtype=torch.float).to(bottom_data.device)
+        argmax_data = torch.zeros([num_rois, pooled_dim, roi_size, roi_size], dtype=torch.int32).to(bottom_data.device)
         if bottom_data.is_cuda:
-            psroi_align_cuda.forward(bottom_data, bottom_rois, top_data, argmax_data, self.spatial_scale, self.roi_size, self.sampling_ratio)
-            self.argmax_data = argmax_data
+            psroi_align_cuda.forward(bottom_data, bottom_rois, top_data, argmax_data, spatial_scale, roi_size, sampling_ratio)
+            ctx.save_for_backward(bottom_rois, argmax_data)
         else:
             raise NotImplementedError
 
         return top_data
 
-    def backward(self, top_diff):
-        assert(self.feature_size is not None and top_diff.is_cuda)
+    @staticmethod
+    def backward(ctx, top_diff):
+        spatial_scale = ctx.spatial_scale
+        roi_size = ctx.roi_size
+        sampling_ratio = ctx.sampling_ratio
+        pooled_dim = ctx.pooled_dim                
+        batch_size, channels, height, width = ctx.feature_size
+        [bottom_rois, argmax_data] = ctx.saved_tensors
+        bottom_diff = None
+        if ctx.needs_input_grad[0]:
+            bottom_diff = torch.zeros([batch_size, channels, height, width], dtype=torch.float).to(top_diff.device)
+            psroi_align_cuda.backward(top_diff, argmax_data, bottom_rois, bottom_diff, spatial_scale, roi_size, sampling_ratio)
 
-        batch_size, channels, height, width = self.feature_size
-
-        bottom_diff = torch.zeros([batch_size, channels, height, width], dtype=torch.float).to(top_diff.device)
-
-        psroi_align_cuda.backward(top_diff, self.argmax_data, self.bottom_rois, bottom_diff, self.spatial_scale, self.roi_size, self.sampling_ratio)
-
-        return bottom_diff, None
+        return bottom_diff, None, None, None, None, None

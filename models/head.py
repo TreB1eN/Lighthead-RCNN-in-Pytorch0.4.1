@@ -4,7 +4,7 @@ from torch.nn import functional as F
 from functions.psroi_pooling.modules.psroi_pool import PSRoIPool
 from functions.roi_align.modules.roi_align import RoIAlignMax
 from utils.utils import normal_init
-from psroi_align import PSRoIAlignFunction
+from functions.psroialign.cuda.psroi_align import PSRoIAlign
 
 class GlobalContextModule(Module):
     def __init__(self, in_channels, mid_channels, out_channels, ksize):
@@ -51,7 +51,7 @@ class LightHeadRCNNResNet101_Head(Module):
             self.pooling = RoIAlignMax(self.roi_size, self.roi_size, self.spatial_scale, self.sampling_ratio)
             self.conv_pool = Conv2d(self.c_out, self.out_channels , 1, bias=False)
         else:
-            self.pooling = PSRoIAlignFunction(self.spatial_scale, self.roi_size, self.sampling_ratio, self.out_channels)
+            self.pooling = PSRoIAlign(self.spatial_scale, self.roi_size, self.sampling_ratio, self.out_channels)
 
     def __call__(self, x, rois):
         # global context module
