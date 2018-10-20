@@ -16,7 +16,7 @@
        i < (n); \
        i += blockDim.x * gridDim.x)
 
-__global__ void my_cuda_forward_kernel(
+__global__ void PSROIAlignForward(
     const float* __restrict__ bottom_data,
     const float* __restrict__ bottom_rois,
     size_t total_size,
@@ -135,7 +135,7 @@ __global__ void my_cuda_forward_kernel(
     }
   }
 
-__global__ void my_cuda_backward_kernel(
+__global__ void PSROIAlignBackward(
     const float* __restrict__ top_diff,
     const int* __restrict__ argmax_data,
     const float* __restrict__ bottom_rois,
@@ -254,7 +254,7 @@ __global__ void my_cuda_backward_kernel(
   } 
 } // namespace
 
-int my_cuda_forward(
+int PSROIAlignForwardLaucher(
     at::Tensor bottom_data,
     at::Tensor bottom_rois,
     at::Tensor top_data,
@@ -275,7 +275,7 @@ int my_cuda_forward(
     const int threads = 16;
     const int blocks = (total_size + threads - 1) / threads;
 
-    my_cuda_forward_kernel<<<blocks, threads>>>(
+    PSROIAlignForward<<<blocks, threads>>>(
       bottom_data.data<float>(),
       bottom_rois.data<float>(),
       total_size,
@@ -300,7 +300,7 @@ int my_cuda_forward(
     return 1;
 }
 
-int my_cuda_backward(
+int PSROIAlignBackwardLaucher(
     at::Tensor top_diff,
     at::Tensor argmax_data,
     at::Tensor bottom_rois,
@@ -321,7 +321,7 @@ int my_cuda_backward(
     const int threads = 16;
     const int blocks = (total_size + threads - 1) / threads;
 
-    my_cuda_backward_kernel<<<blocks, threads>>>(
+    PSROIAlignBackward<<<blocks, threads>>>(
       top_diff.data<float>(),
       argmax_data.data<int>(),
       bottom_rois.data<float>(),

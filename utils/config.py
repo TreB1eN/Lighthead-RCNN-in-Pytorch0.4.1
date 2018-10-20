@@ -64,8 +64,9 @@ class Config(object):
     loc_normalize_std = (0.1, 0.1, 0.2, 0.2)
     
     softnms_Nt = 0.3
+    softnms_method = 2
     softnms_sigma = 0.5
-    softnms_thresh = 0.001
+    softnms_min_score = 0.001
     
     loc_std_tensor = torch.tensor(loc_normalize_std, dtype=torch.float).to(device)
     loc_mean_tensor = torch.tensor(loc_normalize_mean, dtype=torch.float).to(device)

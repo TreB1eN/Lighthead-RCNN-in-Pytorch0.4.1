@@ -17,8 +17,7 @@ from utils.dataset import coco_dataset, prepare_img
 from utils.vis_tools import draw_bbox_class, get_class_colors, to_img, de_preprocess
 from utils.bbox_tools import loc2bbox, x1y1x2y2_2_xywh, xywh_2_x1y1x2y2, adjust_bbox, y1x1y2x2_2_x1y1x2y2
 from utils.utils import get_time, eva_coco
-from functions.nms.nms_wrapper import nms
-from functions.nms.softnms import cpu_soft_nms_idx, softnms_cpu_ori
+from functions.nms.nms_wrapper import nms, soft_nms
 from torch.optim import SGD
 from models.model_utils import get_trainables
 from torch.nn import functional as F
@@ -238,16 +237,18 @@ class LightHeadRCNN_Learner(Module):
             cls_bbox_l = cls_bbox_l[mask]
             prob_l = prob_l[mask]
             if use_softnms:
-                keep = cpu_soft_nms_idx(torch.cat((cls_bbox_l, prob_l.unsqueeze(-1)), dim=1).cpu().numpy(),
-                                        Nt = self.conf.softnms_Nt,
-                                        sigma = self.conf.softnms_sigma,
-                                        threshold = self.conf.softnms_thresh)
+                keep, _  = soft_nms(torch.cat((cls_bbox_l, prob_l.unsqueeze(-1)), dim=1).cpu().numpy(),
+                                    Nt = self.conf.softnms_Nt,
+                                    method = self.conf.softnms_method,
+                                    sigma = self.conf.softnms_sigma,
+                                    min_score = self.conf.softnms_min_score)
+                keep = keep.tolist()
             else:
-                prob_l, order = torch.sort(prob_l, descending=True)
-                cls_bbox_l = cls_bbox_l[order]
-                keep = nms(torch.cat((cls_bbox_l, prob_l.unsqueeze(-1)), dim=1), self.nms_thresh).squeeze(-1).tolist()
+#                 prob_l, order = torch.sort(prob_l, descending=True)
+#                 cls_bbox_l = cls_bbox_l[order]
+                keep = nms(torch.cat((cls_bbox_l, prob_l.unsqueeze(-1)), dim=1), self.nms_thresh).tolist()
             bbox.append(cls_bbox_l[keep])
-                # The labels are in [0, 79].
+            # The labels are in [0, 79].
             label.append((l - 1) * torch.ones((len(keep),), dtype = torch.long))
             prob.append(prob_l[keep])
         if len(bbox) == 0:

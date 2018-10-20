@@ -1,21 +1,46 @@
-# --------------------------------------------------------
-# Fast R-CNN
-# Copyright (c) 2015 Microsoft
-# Licensed under The MIT License [see LICENSE for details]
-# Written by Ross Girshick
-# --------------------------------------------------------
+import numpy as np
 import torch
-# from model.utils.config import cfg
-if torch.cuda.is_available():
-    from functions.nms.nms_gpu import nms_gpu
-from functions.nms.nms_cpu import nms_cpu
 
-def nms(dets, thresh, force_cpu=False):
+from .gpu_nms import gpu_nms
+from .cpu_nms import cpu_nms
+from .cpu_soft_nms import cpu_soft_nms
+
+
+def nms(dets, thresh, device_id=None):
     """Dispatch to either CPU or GPU NMS implementations."""
-    if dets.shape[0] == 0:
-        return []
-    # ---numpy version---
-    # original: return gpu_nms(dets, thresh, device_id=cfg.GPU_ID)
-    # ---pytorch version---
 
-    return nms_gpu(dets, thresh) if force_cpu == False else nms_cpu(dets, thresh)
+    if isinstance(dets, torch.Tensor):
+        if dets.is_cuda:
+            device_id = dets.get_device()
+        dets = dets.detach().cpu().numpy()
+    assert isinstance(dets, np.ndarray)
+
+    if dets.shape[0] == 0:
+        inds = []
+    else:
+        inds = (gpu_nms(dets, thresh, device_id=device_id)
+                if device_id is not None else cpu_nms(dets, thresh))
+
+    if isinstance(dets, torch.Tensor):
+        return dets.new_tensor(inds, dtype=torch.long)
+    else:
+        return np.array(inds, dtype=np.int)
+
+
+def soft_nms(dets, Nt=0.3, method=1, sigma=0.5, min_score=0):
+    if isinstance(dets, torch.Tensor):
+        _dets = dets.detach().cpu().numpy()
+    else:
+        _dets = dets.copy()
+    assert isinstance(_dets, np.ndarray)
+
+    new_dets, inds = cpu_soft_nms(
+        _dets, Nt=Nt, method=method, sigma=sigma, threshold=min_score)
+
+    if isinstance(dets, torch.Tensor):
+        return dets.new_tensor(
+            inds, dtype=torch.long), dets.new_tensor(new_dets)
+    else:
+        return np.array(
+            inds, dtype=np.int), np.array(
+                new_dets, dtype=np.float32)

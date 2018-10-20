@@ -1,5 +1,4 @@
 import numpy as np
-import cupy as cp
 import pdb
 from utils.bbox_tools import bbox2loc, bbox_iou, loc2bbox, enumerate_shifted_anchor, xywh_2_x1y1x2y2
 from utils.nms import nms_cpu
@@ -535,11 +534,7 @@ class ProposalCreator:
         # Apply nms (e.g. threshold = 0.7).
         # Take after_nms_topN (e.g. 300).
 
-        # unNOTE: somthing is wrong here!
-        # TODO: remove cuda.to_gpu
-#         keep = non_maximum_suppression(cp.ascontiguousarray(cp.asarray(roi)), thresh=self.nms_thresh)
-#         keep = nms_cpu(roi, self.nms_thresh)
-        keep = nms(torch.cat((torch.tensor(roi), torch.tensor(score[order]).unsqueeze(1)), dim=1).cuda(), self.nms_thresh).squeeze(-1).tolist()
+        keep = nms(torch.cat((torch.tensor(roi), torch.tensor(score[order]).unsqueeze(1)), dim=1).cuda(), self.nms_thresh).tolist()
         # 调用CUPY版本的 nms
         if n_post_nms > 0:
             keep = keep[:n_post_nms]
