@@ -2,11 +2,11 @@ from setuptools import setup
 from torch.utils.cpp_extension import BuildExtension, CUDAExtension
 
 setup(
-    name='psroi_align_cuda',
+    name='psroialign_cuda',
     ext_modules=[
-        CUDAExtension('psroi_align_cuda', [
-            'psroi_align_cuda.cpp',
-            'psroi_align_cuda_kernel.cu',
+        CUDAExtension('psroialign_cuda', [
+            'psroialign_cuda.cpp',
+            'psroialign_cuda_kernel.cu',
         ]),
     ],
     cmdclass={

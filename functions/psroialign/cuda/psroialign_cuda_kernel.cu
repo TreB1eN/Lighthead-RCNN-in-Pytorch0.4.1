@@ -16,6 +16,95 @@
        i < (n); \
        i += blockDim.x * gridDim.x)
 
+__device__ float bilinear_interpolate(const float *bottom_data,
+                                         const int height, const int width,
+                                         float y, float x) {
+  // deal with cases that inverse elements are out of feature map boundary
+  if (y < -1.0 || y > height || x < -1.0 || x > width) {
+    return 0;
+  }
+
+  if (y <= 0) y = 0;
+  if (x <= 0) x = 0;
+
+  int y_low = (int)y;
+  int x_low = (int)x;
+  int y_high;
+  int x_high;
+
+  if (y_low >= height - 1) {
+    y_high = y_low = height - 1;
+    y = (float)y_low;
+  } else {
+    y_high = y_low + 1;
+  }
+
+  if (x_low >= width - 1) {
+    x_high = x_low = width - 1;
+    x = (float)x_low;
+  } else {
+    x_high = x_low + 1;
+  }
+
+  float ly = y - y_low;
+  float lx = x - x_low;
+  float hy = 1. - ly;
+  float hx = 1. - lx;
+  // do bilinear interpolation
+  float lt = bottom_data[y_low * width + x_low];
+  float rt = bottom_data[y_low * width + x_high];
+  float lb = bottom_data[y_high * width + x_low];
+  float rb = bottom_data[y_high * width + x_high];
+  float w1 = hy * hx, w2 = hy * lx, w3 = ly * hx, w4 = ly * lx;
+
+  float val = (w1 * lt + w2 * rt + w3 * lb + w4 * rb);
+
+  return val;
+}
+
+__device__ void bilinear_interpolate_gradient(const int height, const int width,
+                                              float y, float x,
+                                              float &w1, float &w2,
+                                              float &w3, float &w4,
+                                              int &x_low, int &x_high,
+                                              int &y_low, int &y_high) {
+  // deal with cases that inverse elements are out of feature map boundary
+  if (y < -1.0 || y > height || x < -1.0 || x > width) {
+    w1 = w2 = w3 = w4 = 0.;
+    x_low = x_high = y_low = y_high = -1;
+    return;
+  }
+
+  if (y <= 0) y = 0;
+  if (x <= 0) x = 0;
+
+  y_low = (int)y;
+  x_low = (int)x;
+
+  if (y_low >= height - 1) {
+    y_high = y_low = height - 1;
+    y = (float)y_low;
+  } else {
+    y_high = y_low + 1;
+  }
+
+  if (x_low >= width - 1) {
+    x_high = x_low = width - 1;
+    x = (float)x_low;
+  } else {
+    x_high = x_low + 1;
+  }
+
+  float ly = y - y_low;
+  float lx = x - x_low;
+  float hy = 1. - ly;
+  float hx = 1. - lx;
+
+  w1 = hy * hx, w2 = hy * lx, w3 = ly * hx, w4 = ly * lx;
+
+  return;
+}
+
 __global__ void PSROIAlignForward(
     const float* __restrict__ bottom_data,
     const float* __restrict__ bottom_rois,
@@ -58,7 +147,8 @@ __global__ void PSROIAlignForward(
       gw = min(max(gw, 0), group_size - 1);
       int c = (ctop * group_size + gh) * group_size + gw;
 
-      int bottom_data_offset = c * height * width;
+      // int bottom_data_offset = c * height * width;
+      const float *offset_bottom_data = bottom_data + c * height * width;
 
       // We use roi_bin_grid to sample the grid and mimic integral
       int roi_bin_grid_h = (sampling_ratio > 0)? sampling_ratio : ceil(roi_height / pooled_height);  // e.g. = 2
@@ -73,62 +163,13 @@ __global__ void PSROIAlignForward(
         float y = roi_start_h + ph * bin_size_h + static_cast<float>(iy + .5f) * bin_size_h / static_cast<float>(roi_bin_grid_h);  // e.g. 0.5, 1.5
         for (int ix = 0; ix < roi_bin_grid_w; ix++) {
           float x = roi_start_w + pw * bin_size_w + static_cast<float>(ix + .5f) * bin_size_w / static_cast<float>(roi_bin_grid_w);
-          // bilinear_interpolation {{
-          // deal with cases that inverse elements are
-          // out of feature map boundary
-          if (y < -1. || y > height || x < -1. || x > width) {
-            // empty
-            continue;
+          float tmpval = bilinear_interpolate(offset_bottom_data, height, width, y, x);
+          int bottom_index = iy * roi_bin_grid_w + ix;
+          if (tmpval > maxval) {
+            maxval = tmpval;
+            maxidx = bottom_index;
           }
-
-            if (y <= 0) {
-              y = 0;
-            }
-            if (x <= 0) {
-              x = 0;
-            }
-            int y_low = (int)y;
-            int x_low = (int)x;
-            int y_high;
-            int x_high;
-
-            if (y_low >= height - 1) {
-                y_high = y_low = height - 1;
-                y = (float)y_low;
-            } else {
-              y_high = y_low + 1;
-            }
-
-            if (x_low >= width - 1) {
-              x_high = x_low = width - 1;
-              x = (float)x_low;
-            } else {
-              x_high = x_low + 1;
-            }
-
-            float ly = y - y_low;
-            float lx = x - x_low;
-            float hy = 1. - ly;
-            float hx = 1. - lx;
-            // do bilinear interpolation
-            float v1 = bottom_data[bottom_data_offset + y_low * width + x_low];
-            float v2 = bottom_data[bottom_data_offset + y_low * width + x_high];
-            float v3 = bottom_data[bottom_data_offset + y_high * width + x_low];
-            float v4 = bottom_data[bottom_data_offset + y_high * width + x_high];
-            float w1 = hy * hx;
-            float w2 = hy * lx;
-            float w3 = ly * hx;
-            float w4 = ly * lx;
-
-            // }}
-
-            float tmpval = w1 * v1 + w2 * v2 + w3 * v3 + w4 * v4;
-            int bottom_index = iy * roi_bin_grid_w + ix;
-            if (tmpval > maxval) {
-              maxval = tmpval;
-              maxidx = bottom_index;
-            }
-          }
+        }
       }
       top_data[index] = maxval;
       argmax_data[index] = maxidx;
@@ -197,47 +238,8 @@ __global__ void PSROIAlignBackward(
       float w1, w2, w3, w4;
       int x_low, x_high, y_low, y_high;
 
-      // bilinear_interpolation_gradient {{
-
-      // deal with cases that inverse elements are
-      // out of feature map boundary
-      if (y < -1. || y > height || x < -1. || x > width) {
-        // empty
-        continue;
-      }
-
-      if (y <= 0) {
-        y = 0;
-      }
-      if (x <= 0) {
-        x = 0;
-      }
-
-      y_low = (int)y;
-      x_low = (int)x;
-
-      if (y_low >= height - 1) {
-        y_high = y_low = height - 1;
-        y = (float)y_low;
-      } else {
-        y_high = y_low + 1;
-        }
-      if (x_low >= width - 1) {
-        x_high = x_low = width - 1;
-        x = (float)x_low;
-        } else {
-          x_high = x_low + 1;
-          }
-
-      float ly = y - y_low;
-      float lx = x - x_low;
-      float hy = 1. - ly;
-      float hx = 1. - lx;
-
-      w1 = hy * hx;
-      w2 = hy * lx;
-      w3 = ly * hx;
-      w4 = ly * lx;
+      // bilinear_interpolation_gradient
+      bilinear_interpolate_gradient(height, width, y, x, w1, w2, w3, w4, x_low, x_high, y_low, y_high);      
 
       float g1 = top_diff_this_bin * w1;
       float g2 = top_diff_this_bin * w2;
@@ -272,7 +274,7 @@ int PSROIAlignForwardLaucher(
 
     const auto total_size = batch_size * pooled_dim * pooled_height * pooled_width;
 
-    const int threads = 16;
+    const int threads = 1024;
     const int blocks = (total_size + threads - 1) / threads;
 
     PSROIAlignForward<<<blocks, threads>>>(
@@ -318,7 +320,7 @@ int PSROIAlignBackwardLaucher(
     const auto pooled_width = top_diff.size(3);
     const auto total_size = batch_size * pooled_dim * pooled_height * pooled_width;
   
-    const int threads = 16;
+    const int threads = 1024;
     const int blocks = (total_size + threads - 1) / threads;
 
     PSROIAlignBackward<<<blocks, threads>>>(

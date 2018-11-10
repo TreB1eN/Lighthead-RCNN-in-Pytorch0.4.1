@@ -29,7 +29,7 @@ int PSROIAlignBackwardLaucher(
   CHECK_CUDA(x);       \
   CHECK_CONTIGUOUS(x)
 
-int psroi_align_forward_cuda(
+int psroialign_forward_cuda(
     at::Tensor bottom_data,
     at::Tensor bottom_rois,
     at::Tensor top_data,
@@ -54,7 +54,7 @@ int psroi_align_forward_cuda(
     return 1;
 }
 
-int psroi_align_backward_cuda(
+int psroialign_backward_cuda(
     at::Tensor top_diff,
     at::Tensor argmax_data,
     at::Tensor bottom_rois,
@@ -80,6 +80,6 @@ int psroi_align_backward_cuda(
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("forward", &psroi_align_forward_cuda, "PSRoi_Align forward (CUDA)");
-  m.def("backward", &psroi_align_backward_cuda, "PSRoi_Align backward (CUDA)");
+  m.def("forward", &psroialign_forward_cuda, "PSRoiAlign forward (CUDA)");
+  m.def("backward", &psroialign_backward_cuda, "PSRoiAlign backward (CUDA)");
 }

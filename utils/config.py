@@ -27,7 +27,7 @@ class Config(object):
         maps = json.load(f)
     correct_id_2_class = maps[2]
     
-    use_roi_align = True
+    use_roi_align = False
     
     board_loss_interval = 100
     eval_interval = 10

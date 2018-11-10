@@ -106,7 +106,7 @@ class LightHeadRCNN_Learner(Module):
     
     def forward(self, img_tensor, scale, bboxes=None, labels=None, force_eval=False):
         img_tensor = img_tensor.to(self.conf.device)
-        img_size = (img_tensor.shape[2], img_tensor.shape[3]) # W,H
+        img_size = (img_tensor.shape[2], img_tensor.shape[3]) # H,W
         rpn_feature, roi_feature = self.extractor(img_tensor)
         rpn_locs, rpn_scores, rois, roi_indices, anchor = self.rpn(rpn_feature, img_size, scale)
         if self.training or force_eval:
@@ -117,6 +117,7 @@ class LightHeadRCNN_Learner(Module):
                 return self.train_outputs(rpn_cls_loss, 0, 0, 0, 0, 0, 0)
             sample_roi, gt_roi_locs, gt_roi_labels = self.proposal_target_creator(rois, bboxes, labels)
             roi_cls_locs, roi_scores = self.head(roi_feature, sample_roi)
+#             roi_cls_locs, roi_scores, pool, h, rois = self.head(roi_feature, sample_roi)
             
             gt_rpn_loc = torch.tensor(gt_rpn_loc, dtype=torch.float).to(self.conf.device)
             gt_roi_locs = torch.tensor(gt_roi_locs, dtype=torch.float).to(self.conf.device)
@@ -137,6 +138,17 @@ class LightHeadRCNN_Learner(Module):
                                            self.conf.roi_sigma)
             
             loss_total = rpn_loc_loss + rpn_cls_loss + ohem_roi_loc_loss + ohem_roi_cls_loss
+            
+#             if loss_total.item() > 1000.:
+#                 print('ohem_roi_loc_loss : {}, ohem_roi_cls_loss : {}'.format(ohem_roi_loc_loss, ohem_roi_cls_loss))
+#                 torch.save(pool, 'pool_debug.pth')
+#                 torch.save(h, 'h_debug.pth')
+#                 np.save('rois_debug', rois)
+#                 torch.save(roi_cls_locs, 'roi_cls_locs_debug.pth')
+#                 torch.save(roi_scores, 'roi_scores_debug.pth')
+#                 torch.save(gt_roi_locs, 'gt_roi_locs_debug.pth')
+#                 torch.save(gt_roi_labels, 'gt_roi_labels_debug.pth')
+#                 pdb.set_trace()
             
             return self.train_outputs(loss_total, 
                                       rpn_loc_loss.item(), 
@@ -332,8 +344,8 @@ class LightHeadRCNN_Learner(Module):
         while epoch <= epochs:
             print('start the training of epoch : {}'.format(epoch))
             self.lr_schedule(epoch)
-            for index in tqdm(np.random.permutation(self.train_length), total = self.train_length):
-#             for index in tqdm(range(self.train_length), total = self.train_length):
+#             for index in tqdm(np.random.permutation(self.train_length), total = self.train_length):
+            for index in tqdm(range(self.train_length), total = self.train_length):
                 try:
                     inputs = self.train_dataset[index]
                 except:

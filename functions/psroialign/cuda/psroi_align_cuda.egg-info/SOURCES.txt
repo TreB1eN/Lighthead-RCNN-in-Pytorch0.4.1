@@ -1,7 +1,0 @@
-psroi_align_cuda.cpp
-psroi_align_cuda_kernel.cu
-setup.py
-psroi_align_cuda.egg-info/PKG-INFO
-psroi_align_cuda.egg-info/SOURCES.txt
-psroi_align_cuda.egg-info/dependency_links.txt
-psroi_align_cuda.egg-info/top_level.txt

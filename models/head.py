@@ -5,7 +5,8 @@ from functions.psroi_pooling.modules.psroi_pool import PSRoIPool
 from functions.roi_align.modules.roi_align import RoIAlignMax
 from functions.mmdet.roi_align.modules.roi_align import RoIAlign
 from utils.utils import normal_init
-from functions.psroialign.cuda.psroi_align import PSRoIAlign
+from functions.psroialign.cuda.psroialign import PSRoIAlign
+import pdb
 
 class GlobalContextModule(Module):
     def __init__(self, in_channels, mid_channels, out_channels, ksize):
@@ -65,8 +66,7 @@ class LightHeadRCNNResNet101_Head(Module):
             pool = self.conv_pool(pool)
         else:
             # psroi max align
-            pool = self.pooling(h, torch.tensor(rois).to(device))
-        
+            pool = self.pooling(h, torch.tensor(rois).to(device))        
         pool = self.flatten(pool)
         # fc
         fc1 = F.relu(self.fc1(pool))
