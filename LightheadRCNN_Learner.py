@@ -310,6 +310,10 @@ class LightHeadRCNN_Learner(Module):
             self.nms_thresh = 0.5
             self.score_thresh = 0.25
             self.max_n_predict = 40
+        elif preset == 'detect':
+            self.nms_thresh = 0.5
+            self.score_thresh = 0.6
+            self.max_n_predict = 30
         elif preset == 'evaluate':
             self.nms_thresh = 0.5
             self.score_thresh = 0.0
@@ -425,9 +429,6 @@ class LightHeadRCNN_Learner(Module):
                             img, _, _, _ , _= self.val_dataset.orig_dataset[i]  
                             img = Image.fromarray(img.astype('uint8').transpose(1,2,0))
                             predicted_img = self.predict_on_img(img, preset='visualize', return_img=True, with_scores=True, original_size=True) 
-#                             if type(predicted_img) == tuple: 
-#                                 self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(img), global_step=self.step)
-#                             else: ## should be deleted after test
                             self.writer.add_image('pred_image_{}'.format(i), trans.ToTensor()(predicted_img), global_step=self.step)
                             self.set_training()
                     

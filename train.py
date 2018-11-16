@@ -3,7 +3,7 @@ import argparse
 from LightheadRCNN_Learner import LightHeadRCNN_Learner
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Train CornerNet")
+    parser = argparse.ArgumentParser(description="Train Lighthead - RCNN")
     parser.add_argument("-r", "--resume", help="whether resume from the latest saved model",action="store_true")
     parser.add_argument("-save", "--from_save_folder", help="whether resume from the save path",action="store_true")
     args = parser.parse_args()
