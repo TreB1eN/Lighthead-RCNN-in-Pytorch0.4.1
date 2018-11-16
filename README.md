@@ -132,3 +132,9 @@ More detailed configuration is in [utils/config.py](https://github.com/TreB1eN/L
 ------
 
 ![](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/Light-head-RCNN.jpg)
+
+## Contact
+
+Email : treb1en@qq.com
+
+Questions and PRs are welcome
