@@ -32,10 +32,7 @@ class LightHeadRCNN_Learner(Module):
         super(LightHeadRCNN_Learner, self).__init__()
         self.conf = Config()
         self.class_2_color = get_class_colors(self.conf)   
-
-        self.extractor = ResNet101Extractor(self.conf.pretrained_model_path).to(self.conf.device)
         self.rpn = RegionProposalNetwork().to(self.conf.device)
-#         self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, self.conf.roi_size).to(self.conf.device)
         self.loc_normalize_mean=(0., 0., 0., 0.),
         self.loc_normalize_std=(0.1, 0.1, 0.2, 0.2)
         self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, self.conf.roi_size).to(self.conf.device)
@@ -43,6 +40,7 @@ class LightHeadRCNN_Learner(Module):
         self.detections = namedtuple('detections', ['roi_cls_locs', 'roi_scores', 'rois'])
              
         if training:
+            self.extractor = ResNet101Extractor(self.conf.pretrained_model_path).to(self.conf.device)
             self.train_dataset = coco_dataset(self.conf, mode = 'train')
             self.train_length = len(self.train_dataset)
             self.val_dataset =  coco_dataset(self.conf, mode = 'val')
@@ -80,6 +78,8 @@ class LightHeadRCNN_Learner(Module):
 #             self.eva_on_coco_every = 7
 #             self.board_pred_image_every = 8
 #             self.save_every = 10
+        else:
+            self.extractor = ResNet101Extractor().to(self.conf.device)
         
     def set_training(self):
         self.train()
