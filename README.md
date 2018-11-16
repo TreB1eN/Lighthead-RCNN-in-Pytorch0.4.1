@@ -77,12 +77,18 @@ Lighthead-RCNN-Pytorch
 
    ```shell
    git clone https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1.git
+   cd Lighthead-RCNN-in-Pytorch0.4.1/
    ```
 
-3. Compile cuda extensions.
+3. Install dependencies
 
    ```shell
-   cd Lighthead-RCNN-in-Pytorch0.4.1/
+   pip install -r requirements.txt
+   ```
+
+4. Compile cuda extensions.
+
+   ```shell
    ./compile.sh  # or "PYTHON=python3 ./compile.sh" if you use system python3 without virtual environments
    ```
 
@@ -106,7 +112,7 @@ python train.py
 
 ------
 
-More detailed configuration is in [utils](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/tree/master/utils)/**config.py**
+More detailed configuration is in [utils.config.py](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/utils/config.py)
 
 ## References
 
@@ -116,3 +122,12 @@ More detailed configuration is in [utils](https://github.com/TreB1eN/Lighthead-R
 
 [paper](https://arxiv.org/abs/1711.07264) 
 
+## Demos
+
+![](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/city_detected.jpg)
+
+![https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/dinner_detected.jpg]()
+
+![https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/football_detected.jpg]()
+
+![https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/person_detected.jpg]()

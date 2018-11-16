@@ -1,0 +1,14 @@
+torchvision==0.2.1
+setuptools==20.7.0
+numpy==1.11.0
+six==1.10.0
+Cython==0.29
+Pillow==5.3.0
+chainer==5.0.0
+chainercv==0.11.0
+matplotlib==3.0.2
+model==0.6.0
+pycocotools==2.0.0
+tensorboardX==1.4
+torch==0.4.1.post2
+tqdm==4.28.1
