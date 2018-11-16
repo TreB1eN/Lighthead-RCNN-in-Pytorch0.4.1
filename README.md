@@ -112,7 +112,7 @@ python train.py
 
 ------
 
-More detailed configuration is in [utils.config.py](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/utils/config.py)
+More detailed configuration is in [utils/config.py](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/utils/config.py)
 
 ## References
 
