@@ -5,15 +5,12 @@ Implementation of [Lighthead-RCNN](https://arxiv.org/abs/1711.07264) in Pytorch 
 ## Contributions
 
 - The first reimplementation of [Lighthead-RCNN](https://arxiv.org/abs/1711.07264)  in full stable Pytorch codes
-
 - A new implementation of CUDA codes of [Position Sensitive ROI Pooling](https://arxiv.org/abs/1605.06409) is provided, in case all previous ones don't work under the Pytorch version >= 0.4
-
 - Pretrained model is provided
 
 ------
 
 - At the time being, this repo only support single batch training.
-
 - Dataloader from chainercv is used in training
 
 ## Pretrained model and Performance
@@ -46,11 +43,18 @@ I have only trained it with 18 epochs instead of 30 epochs in the original paper
 
 ### Preparation
 
-1. #### Prepare COCO dataset.
+1. #### Clone the this repository.
+
+   ```shell
+   git clone https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1.git
+   cd Lighthead-RCNN-in-Pytorch0.4.1/
+   ```
+
+2. #### Prepare COCO dataset.
 
    It is recommended to symlink the dataset root to `$Lighthead-RCNN-Pytorch/data`.
 
-2. #### Create following folders and download the [pretrained model](https://drive.google.com/file/d/10Ku_G2FABjtEjWp3XWVmuguPkpbaTGV4/view?usp=sharing) to work_space/final
+3. #### Create following folders and download the [pretrained model](https://drive.google.com/file/d/10Ku_G2FABjtEjWp3XWVmuguPkpbaTGV4/view?usp=sharing) to work_space/final
 
 ```shell
 Lighthead-RCNN-Pytorch
@@ -73,20 +77,13 @@ Lighthead-RCNN-Pytorch
 
 1. Install PyTorch 0.4.1 and torchvision following the [official instructions](https://pytorch.org/).
 
-2. Clone the this repository.
-
-   ```shell
-   git clone https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1.git
-   cd Lighthead-RCNN-in-Pytorch0.4.1/
-   ```
-
-3. Install dependencies
+2. Install dependencies
 
    ```shell
    pip install -r requirements.txt
    ```
 
-4. Compile cuda extensions.
+3. Compile cuda extensions.
 
    ```shell
    ./compile.sh  # or "PYTHON=python3 ./compile.sh" if you use system python3 without virtual environments
