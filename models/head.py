@@ -41,7 +41,6 @@ class LightHeadRCNNResNet101_Head(Module):
         self.sampling_ratio = sampling_ratio
         self.c_out = self.roi_size * self.roi_size * self.out_channels 
         self.global_context_module = GlobalContextModule(2048, 256, self.c_out, 15)
-        self.roi_align = roi_align
         self.flatten = Flatten()
         self.fc1 = Linear(self.c_out, 2048)
         self.score = Linear(2048, n_class)
