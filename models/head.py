@@ -1,9 +1,9 @@
 import torch
 from torch.nn import Conv2d, Linear, Module
 from torch.nn import functional as F
-from functions.psroi_pooling.modules.psroi_pool import PSRoIPool
-from functions.roi_align.modules.roi_align import RoIAlignMax
-from functions.mmdet.roi_align.modules.roi_align import RoIAlign
+# from functions.psroi_pooling.modules.psroi_pool import PSRoIPool
+# from functions.roi_align.modules.roi_align import RoIAlignMax
+# from functions.mmdet.roi_align.modules.roi_align import RoIAlign
 from utils.utils import normal_init
 from functions.psroialign.cuda.psroialign import PSRoIAlign
 import pdb
@@ -32,8 +32,7 @@ class LightHeadRCNNResNet101_Head(Module):
                  roi_size = 7,
                  out_channels = 10,
                  spatial_scale = 1/16.,
-                 sampling_ratio = 2,
-                 roi_align = False):
+                 sampling_ratio = 2):
         super(LightHeadRCNNResNet101_Head, self).__init__()
         self.n_class = n_class
         self.spatial_scale = spatial_scale
@@ -49,24 +48,13 @@ class LightHeadRCNNResNet101_Head(Module):
         self.cls_loc = Linear(2048, 4 * n_class)
         self.apply(lambda x : normal_init(x, 0, 0.01))
         self.cls_loc.apply(lambda x : normal_init(x, 0, 0.001))
-        if self.roi_align:
-            self.pooling = RoIAlignMax(self.roi_size, self.roi_size, self.spatial_scale, self.sampling_ratio)
-#             self.pooling = RoIAlign(self.roi_size, self.spatial_scale, self.sampling_ratio)
-            self.conv_pool = Conv2d(self.c_out, self.out_channels , 1, bias=False)
-        else:
-            self.pooling = PSRoIAlign(self.spatial_scale, self.roi_size, self.sampling_ratio, self.out_channels)
+        self.pooling = PSRoIAlign(self.spatial_scale, self.roi_size, self.sampling_ratio, self.out_channels)
 
     def __call__(self, x, rois):
         # global context module
         device = x.device
         h = self.global_context_module(x)
-        if self.roi_align:
-            func_roi = torch.cat((torch.zeros([rois.shape[0],1], device=device), torch.tensor(rois).to(device)), dim=1) 
-            pool = self.pooling(h, func_roi)
-            pool = self.conv_pool(pool)
-        else:
-            # psroi max align
-            pool = self.pooling(h, torch.tensor(rois).to(device))        
+        pool = self.pooling(h, torch.tensor(rois).to(device))        
         pool = self.flatten(pool)
         # fc
         fc1 = F.relu(self.fc1(pool))

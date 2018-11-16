@@ -38,9 +38,7 @@ class LightHeadRCNN_Learner(Module):
 #         self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, self.conf.roi_size).to(self.conf.device)
         self.loc_normalize_mean=(0., 0., 0., 0.),
         self.loc_normalize_std=(0.1, 0.1, 0.2, 0.2)
-        self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, 
-                                                self.conf.roi_size, 
-                                                roi_align = self.conf.use_roi_align).to(self.conf.device)
+        self.head = LightHeadRCNNResNet101_Head(self.conf.class_num + 1, self.conf.roi_size).to(self.conf.device)
         self.class_2_color = get_class_colors(self.conf)
         self.detections = namedtuple('detections', ['roi_cls_locs', 'roi_scores', 'rois'])
              
