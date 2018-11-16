@@ -10,9 +10,9 @@ Implementation of [Lighthead-RCNN](https://arxiv.org/abs/1711.07264) in Pytorch 
 
 - Pretrained model is provided
 
-- ------
+------
 
-  At the time being, this repo only support single batch training.
+- At the time being, this repo only support single batch training.
 
 - Dataloader from chainercv is used in training
 
