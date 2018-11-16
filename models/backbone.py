@@ -12,7 +12,7 @@ class ResNet101Extractor(Module):
     This outputs feature maps.
     Dilated convolution is used in the C5 stage.'''
 
-    def __init__(self, path = 'models/lighthead-rcnn-extractor-pretrained.pth'):
+    def __init__(self, path = None):
         super(ResNet101Extractor, self).__init__()
         kwargs = {
             'stride_first': True,
