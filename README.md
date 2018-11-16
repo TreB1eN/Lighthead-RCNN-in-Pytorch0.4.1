@@ -126,8 +126,8 @@ More detailed configuration is in [utils.config.py](https://github.com/TreB1eN/L
 
 ![](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/city_detected.jpg)
 
-![https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/dinner_detected.jpg]()
+![](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/dinner_detected.jpg)
 
-![https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/football_detected.jpg]()
+![](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/football_detected.jpg)
 
-![https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/person_detected.jpg]()
+![](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/data/person_detected.jpg)
