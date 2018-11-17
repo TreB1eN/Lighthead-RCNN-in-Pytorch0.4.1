@@ -103,13 +103,13 @@ python eval.py
 
 ### Train
 
-```shell
-python train.py 
-```
+1. Download the pretrained backbone [Res101 model](https://drive.google.com/file/d/1_MnYyJ30f_czWnBBpfOBwUo6x4B1eF79/view?usp=sharing) to `models` folder
 
-------
+2. ```shell
+   python train.py 
+   ```
 
-More detailed configuration is in [utils/config.py](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/utils/config.py)
+3. More detailed configuration is in [utils/config.py](https://github.com/TreB1eN/Lighthead-RCNN-in-Pytorch0.4.1/blob/master/utils/config.py)
 
 ## References
 
